@@ -88,7 +88,7 @@ Lambda teaches **real Linux skills** through gameplay necessity:
 ./gradlew bootRun
 
 # Connect via telnet (separate terminal)
-telnet localhost 8181
+telnet localhost
 ```
 
 ### 🆕 First Time Setup
@@ -100,7 +100,7 @@ telnet localhost 8181
 ### 🎯 **New Player Tutorial: Your Path to the First Elemental Symbol**
 
 #### **Your First 10 Minutes - Getting Started:**
-1. **Connect**: `telnet localhost 8181`
+1. **Connect**: `telnet localhost`
 2. **Create Character**: Choose username, display name, and ethnicity avatar
 3. **Check Status**: `status` to see your Lambda entity information
 4. **Learn Movement**: `cc (x,y)` to change coordinates directly to any position
@@ -982,7 +982,7 @@ Navigate themed matrix levels with unique challenges and atmospheres
 ### 🏗️ Architecture
 - **Platform**: Grails 6.x with Spring Boot
 - **Database**: H2 (development), configurable for production
-- **Interface**: Multi-threaded telnet server (port 8181)
+- **Interface**: Multi-threaded telnet server (port 23)
 - **Web Interface**: Management portal (port 8080)
 - **Audio**: Java Sound API with procedural generation
 
@@ -1037,7 +1037,7 @@ Navigate themed matrix levels with unique challenges and atmospheres
 - **Audio Integration**: Sound feedback for mini-game start, success, and failure states
 
 **🎯 Current Status:**
-- **Fully Playable**: `telnet localhost 8181`
+- **Fully Playable**: `telnet localhost`
 - **Production Ready**: All major systems stable and operational
 - **Competitively Balanced**: Racing dynamics with fair progression mechanics
 - **Hardware Ready**: GPIO integration points established
@@ -1090,7 +1090,7 @@ Perfect for developers who appreciate:
 Lambda represents a unique fusion of retro gaming, programming education, and social strategy. Whether you're contributing code, testing mechanics, or simply experiencing this digital underground adventure—join us in bringing consciousness to the forgotten corners of cyberspace.
 
 **Current Status**: v0.6 fully operational with interactive repair system
-**Connect**: `telnet localhost 8181`
+**Connect**: `telnet localhost`
 
 <div align="center">
 <a href="#-navigation-menu">↑ Back to Navigation</a>
