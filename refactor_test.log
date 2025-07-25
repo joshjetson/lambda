@@ -1,0 +1,52 @@
+Starting a Gradle Daemon, 5 busy and 1 stopped Daemons could not be reused, use --status for details
+> Task :compileJava NO-SOURCE
+> Task :compileGroovy
+> Task :buildProperties
+> Task :processResources UP-TO-DATE
+> Task :classes
+> Task :bootRunMainClassName
+
+> Task :bootRun
+Initialized 120 board positions across 10 matrix levels
+Created wiped test coordinate at (0,1) for repair mini-game testing
+Telnet server started on port 8181
+Audio system initialized
+Elemental symbols initialized
+✅ Initialized 4 puzzle logic fragments
+Initializing randomized puzzle elements for session SESSION_1753100777369_396943, map 1
+Puzzle system failed to initialize: Validation Error(s) occurred during save():
+- Field error in object 'ysap.HiddenVariable' on field 'elementType': rejected value [null]; codes [ysap.HiddenVariable.elementType.nullable.error.ysap.HiddenVariable.elementType,ysap.HiddenVariable.elementType.nullable.error.elementType,ysap.HiddenVariable.elementType.nullable.error.java.lang.String,ysap.HiddenVariable.elementType.nullable.error,hiddenVariable.elementType.nullable.error.ysap.HiddenVariable.elementType,hiddenVariable.elementType.nullable.error.elementType,hiddenVariable.elementType.nullable.error.java.lang.String,hiddenVariable.elementType.nullable.error,ysap.HiddenVariable.elementType.nullable.ysap.HiddenVariable.elementType,ysap.HiddenVariable.elementType.nullable.elementType,ysap.HiddenVariable.elementType.nullable.java.lang.String,ysap.HiddenVariable.elementType.nullable,hiddenVariable.elementType.nullable.ysap.HiddenVariable.elementType,hiddenVariable.elementType.nullable.elementType,hiddenVariable.elementType.nullable.java.lang.String,hiddenVariable.elementType.nullable,nullable.ysap.HiddenVariable.elementType,nullable.elementType,nullable.java.lang.String,nullable]; arguments [elementType,class ysap.HiddenVariable]; default message [Property [{0}] of class [{1}] cannot be null]
+
+🤖 Starting auto-defrag system with 1-minute destruction cycles
+✅ Auto-defrag system started successfully
+Auto-defrag system initialized
+Lambda: A Digital Entities Game initialized
+Telnet server running on port 8181
+Connect via: telnet localhost 8181
+Grails application running at http://localhost:8080 in environment: development
+Client connected. Total clients: 1
+Detected terminal size: unknown
+DEBUG: WHILE LOOP RUNNING  :#1
+DEBUG: PAST SHOW PROMPT :#2
+DEBUG: Received input: 'help'  :#3
+DEBUG: isPlayerInRepairSession(refactortest) -> session=null, isActive=null, result=false
+DEBUG: Checking repair session for refactortest, isInSession: false
+DEBUG: isPlayerInRepairSession(refactortest) -> session=null, isActive=null, result=false
+ELSE BLOCK BEGIN ====
+DEBUG: PROCESSING GAME COMMAND
+ELSE BLOCK END ====
+DEBUG: WHILE LOOP RUNNING  :#1
+DEBUG: PAST SHOW PROMPT :#2
+DEBUG: Received input: 'quit'  :#3
+DEBUG: isPlayerInRepairSession(refactortest) -> session=null, isActive=null, result=false
+DEBUG: Checking repair session for refactortest, isInSession: false
+DEBUG: isPlayerInRepairSession(refactortest) -> session=null, isActive=null, result=false
+ELSE BLOCK BEGIN ====
+DEBUG: PROCESSING GAME COMMAND
+DEBUG: QUIT command received in processGameCommand
+DEBUG: BEFORE TRY :#5
+DEBUG: INSIDE TRY :#6
+Client disconnected. Total clients: 0
+🤖 Auto-defrag cycle 1 executing...
+🤖 Auto-defrag destroyed coordinate (6,0) on Matrix Level 2
+Could not broadcast defrag alert: No signature of method: ysap.ChatService.broadcastSystemMessage() is applicable for argument types: (String) values: [🤖 AUTO-DEFRAG: 1 coordinate(s) destroyed by system defrag bots!]

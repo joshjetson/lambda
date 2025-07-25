@@ -1,0 +1,158 @@
+> Task :compileJava NO-SOURCE
+> Task :compileGroovy
+> Task :buildProperties UP-TO-DATE
+> Task :processResources UP-TO-DATE
+> Task :classes
+> Task :bootRunMainClassName
+
+> Task :bootRun
+Initialized 120 board positions across 10 matrix levels
+Created wiped test coordinate at (0,1) for repair mini-game testing
+DEBUG: About to spawn merchants...
+DEBUG: spawnMerchantsForAllLevels() called
+DEBUG: Spawning merchant for level 1
+DEBUG: Level 1 result: Binary Bill at (5,5)
+DEBUG: Spawning merchant for level 2
+DEBUG: Level 2 result: Binary Bill at (4,6)
+DEBUG: Spawning merchant for level 3
+DEBUG: Level 3 result: Data Stream Dave at (4,4)
+DEBUG: Spawning merchant for level 4
+DEBUG: Level 4 result: The Logic Peddler at (8,6)
+DEBUG: Spawning merchant for level 5
+DEBUG: Level 5 result: Stack Overflow Sam at (4,6)
+DEBUG: Spawning merchant for level 6
+DEBUG: Level 6 result: Binary Bill at (5,3)
+DEBUG: Spawning merchant for level 7
+DEBUG: Level 7 result: Stack Overflow Sam at (2,9)
+DEBUG: Spawning merchant for level 8
+DEBUG: Level 8 result: The Logic Peddler at (7,6)
+DEBUG: Spawning merchant for level 9
+DEBUG: Level 9 result: The Bit Baron at (6,6)
+DEBUG: Spawning merchant for level 10
+DEBUG: Level 10 result: Data Stream Dave at (3,5)
+DEBUG: spawnMerchantsForAllLevels() completed successfully
+DEBUG: Finished spawning merchants
+Telnet server started on port 8181
+Audio system initialized
+Elemental symbols initialized
+✅ Initialized 4 puzzle logic fragments
+Initializing randomized puzzle elements for session SESSION_1753054965650_073662, map 1
+Puzzle system failed to initialize: Validation Error(s) occurred during save():
+- Field error in object 'ysap.HiddenVariable' on field 'elementType': rejected value [null]; codes [ysap.HiddenVariable.elementType.nullable.error.ysap.HiddenVariable.elementType,ysap.HiddenVariable.elementType.nullable.error.elementType,ysap.HiddenVariable.elementType.nullable.error.java.lang.String,ysap.HiddenVariable.elementType.nullable.error,hiddenVariable.elementType.nullable.error.ysap.HiddenVariable.elementType,hiddenVariable.elementType.nullable.error.elementType,hiddenVariable.elementType.nullable.error.java.lang.String,hiddenVariable.elementType.nullable.error,ysap.HiddenVariable.elementType.nullable.ysap.HiddenVariable.elementType,ysap.HiddenVariable.elementType.nullable.elementType,ysap.HiddenVariable.elementType.nullable.java.lang.String,ysap.HiddenVariable.elementType.nullable,hiddenVariable.elementType.nullable.ysap.HiddenVariable.elementType,hiddenVariable.elementType.nullable.elementType,hiddenVariable.elementType.nullable.java.lang.String,hiddenVariable.elementType.nullable,nullable.ysap.HiddenVariable.elementType,nullable.elementType,nullable.java.lang.String,nullable]; arguments [elementType,class ysap.HiddenVariable]; default message [Property [{0}] of class [{1}] cannot be null]
+
+🤖 Starting auto-defrag system with 1-minute destruction cycles
+✅ Auto-defrag system started successfully
+Auto-defrag system initialized
+Lambda: A Digital Entities Game initialized
+Telnet server running on port 8181
+Connect via: telnet localhost 8181
+Grails application running at http://localhost:8080 in environment: development
+Client connected. Total clients: 1
+Detected terminal size: unknown
+WHILE LOOP RUNNING
+DEBUG: Received input: 'map'
+DEBUG: isPlayerInRepairSession(maptest2) -> session=null, isActive=null, result=false
+DEBUG: Checking repair session for maptest2, isInSession: false
+DEBUG: isPlayerInRepairSession(maptest2) -> session=null, isActive=null, result=false
+ELSE BLOCK BEGIN ====
+🌍 NEW GAME SESSION STARTED: LAMBDA_1753054981391_075912
+🎲 All logic fragments and special items will be randomly redistributed
+🎲 Initialized random fragment distribution for Matrix Level 1: 30 fragments placed
+ELSE BLOCK END ====
+WHILE LOOP RUNNING
+DEBUG: Received input: 'quit'
+Client disconnected. Total clients: 0
+Client connected. Total clients: 1
+Detected terminal size: unknown
+WHILE LOOP RUNNING
+DEBUG: Received input: 'map'
+DEBUG: isPlayerInRepairSession(josh) -> session=null, isActive=null, result=false
+DEBUG: Checking repair session for josh, isInSession: false
+DEBUG: isPlayerInRepairSession(josh) -> session=null, isActive=null, result=false
+ELSE BLOCK BEGIN ====
+ELSE BLOCK END ====
+WHILE LOOP RUNNING
+🤖 Auto-defrag cycle 1 executing...
+🤖 Auto-defrag destroyed coordinate (9,6) on Matrix Level 2
+🤖 Auto-defrag destroyed coordinate (6,8) on Matrix Level 2
+Could not broadcast defrag alert: No signature of method: ysap.ChatService.broadcastSystemMessage() is applicable for argument types: (String) values: [🤖 AUTO-DEFRAG: 2 coordinate(s) destroyed by system defrag bots!]
+🤖 Auto-defrag cycle 2 executing...
+🤖 Auto-defrag destroyed coordinate (8,0) on Matrix Level 3
+🤖 Auto-defrag destroyed coordinate (3,6) on Matrix Level 3
+🤖 Auto-defrag destroyed coordinate (7,8) on Matrix Level 3
+Could not broadcast defrag alert: No signature of method: ysap.ChatService.broadcastSystemMessage() is applicable for argument types: (String) values: [🤖 AUTO-DEFRAG: 3 coordinate(s) destroyed by system defrag bots!]
+File /Users/josh/dev/ysap/grails-app/init/ysap/BootStrap.groovy changed, recompiling...
+Telnet server stopped
+Exception in thread "Thread-9" java.net.SocketException: Socket closed
+	at java.base/java.net.PlainSocketImpl.socketAccept(Native Method)
+	at java.base/java.net.AbstractPlainSocketImpl.accept(AbstractPlainSocketImpl.java:474)
+	at java.base/java.net.ServerSocket.implAccept(ServerSocket.java:565)
+	at java.base/java.net.ServerSocket.accept(ServerSocket.java:533)
+	at java_net_ServerSocket$accept.call(Unknown Source)
+	at ysap.TelnetServerService$_startServer_closure1.doCall(TelnetServerService.groovy:86)
+	at ysap.TelnetServerService$_startServer_closure1.doCall(TelnetServerService.groovy)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:566)
+	at org.codehaus.groovy.reflection.CachedMethod.invoke(CachedMethod.java:107)
+	at groovy.lang.MetaMethod.doMethodInvoke(MetaMethod.java:323)
+	at org.codehaus.groovy.runtime.metaclass.ClosureMetaClass.invokeMethod(ClosureMetaClass.java:274)
+	at groovy.lang.MetaClassImpl.invokeMethod(MetaClassImpl.java:1035)
+	at groovy.lang.Closure.call(Closure.java:412)
+	at groovy.lang.Closure.call(Closure.java:406)
+	at groovy.lang.Closure.run(Closure.java:493)
+	at java.base/java.lang.Thread.run(Thread.java:829)
+[2m2025-07-20 18:44:19.677[0;39m [31mERROR[0;39m [2m---[0;39m [2m[o-8080-Acceptor][0;39m [36morg.apache.tomcat.util.net.Acceptor     [0;39m [2m:[0;39m Socket accept failed
+
+java.nio.channels.AsynchronousCloseException: null
+	at java.base/java.nio.channels.spi.AbstractInterruptibleChannel.end(AbstractInterruptibleChannel.java:202)
+	at java.base/sun.nio.ch.ServerSocketChannelImpl.end(ServerSocketChannelImpl.java:269)
+	at java.base/sun.nio.ch.ServerSocketChannelImpl.accept(ServerSocketChannelImpl.java:288)
+	at org.apache.tomcat.util.net.NioEndpoint.serverSocketAccept(NioEndpoint.java:548)
+	at org.apache.tomcat.util.net.NioEndpoint.serverSocketAccept(NioEndpoint.java:79)
+	at org.apache.tomcat.util.net.Acceptor.run(Acceptor.java:129)
+	at java.base/java.lang.Thread.run(Thread.java:829)
+
+Initialized 120 board positions across 10 matrix levels
+Created wiped test coordinate at (0,1) for repair mini-game testing
+DEBUG: About to spawn merchants...
+DEBUG: spawnMerchantsForAllLevels() called
+DEBUG: Spawning merchant for level 1
+DEBUG: Level 1 result: Alpha Fragment Dealer at (1,2)
+DEBUG: Spawning merchant for level 2
+DEBUG: Level 2 result: Binary Bill at (9,1)
+DEBUG: Spawning merchant for level 3
+DEBUG: Level 3 result: The Bit Baron at (6,4)
+DEBUG: Spawning merchant for level 4
+DEBUG: Level 4 result: Stack Overflow Sam at (3,0)
+DEBUG: Spawning merchant for level 5
+DEBUG: Level 5 result: Binary Bill at (7,2)
+DEBUG: Spawning merchant for level 6
+DEBUG: Level 6 result: Binary Bill at (0,8)
+DEBUG: Spawning merchant for level 7
+DEBUG: Level 7 result: Data Stream Dave at (3,7)
+DEBUG: Spawning merchant for level 8
+DEBUG: Level 8 result: Data Stream Dave at (4,1)
+DEBUG: Spawning merchant for level 9
+DEBUG: Level 9 result: Stack Overflow Sam at (4,5)
+DEBUG: Spawning merchant for level 10
+DEBUG: Level 10 result: Gamma Exchange at (7,1)
+DEBUG: spawnMerchantsForAllLevels() completed successfully
+DEBUG: Finished spawning merchants
+DEBUG: Total merchants in database: 10
+Telnet server started on port 8181
+Audio system initialized
+Elemental symbols initialized
+✅ Initialized 4 puzzle logic fragments
+Initializing randomized puzzle elements for session SESSION_1753055061770_543172, map 1
+Puzzle system failed to initialize: Validation Error(s) occurred during save():
+- Field error in object 'ysap.HiddenVariable' on field 'elementType': rejected value [null]; codes [ysap.HiddenVariable.elementType.nullable.error.ysap.HiddenVariable.elementType,ysap.HiddenVariable.elementType.nullable.error.elementType,ysap.HiddenVariable.elementType.nullable.error.java.lang.String,ysap.HiddenVariable.elementType.nullable.error,hiddenVariable.elementType.nullable.error.ysap.HiddenVariable.elementType,hiddenVariable.elementType.nullable.error.elementType,hiddenVariable.elementType.nullable.error.java.lang.String,hiddenVariable.elementType.nullable.error,ysap.HiddenVariable.elementType.nullable.ysap.HiddenVariable.elementType,ysap.HiddenVariable.elementType.nullable.elementType,ysap.HiddenVariable.elementType.nullable.java.lang.String,ysap.HiddenVariable.elementType.nullable,hiddenVariable.elementType.nullable.ysap.HiddenVariable.elementType,hiddenVariable.elementType.nullable.elementType,hiddenVariable.elementType.nullable.java.lang.String,hiddenVariable.elementType.nullable,nullable.ysap.HiddenVariable.elementType,nullable.elementType,nullable.java.lang.String,nullable]; arguments [elementType,class ysap.HiddenVariable]; default message [Property [{0}] of class [{1}] cannot be null]
+
+🤖 Starting auto-defrag system with 1-minute destruction cycles
+✅ Auto-defrag system started successfully
+Auto-defrag system initialized
+Lambda: A Digital Entities Game initialized
+Telnet server running on port 8181
+Connect via: telnet localhost 8181
+Grails application running at http://localhost:8080 in environment: development

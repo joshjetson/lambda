@@ -1,0 +1,7 @@
+- If a user is being attacked he will also have the ability to stop the attack by the same lock mechanism but with 1 less number and after the attack is stopped or over the player should have immunity for some time from attacks because the user might be working on something
+- that would make it really hard to progress with otherwise if they were constantly being attacked
+- If a player attacks and it is successful he should also have immunity for a little while from the same player that he stole from
+- A player race should have the ability to detect adjacent items
+- A player race will have the ability to drop traps that will make it so a player cannot move from one coordinate to another for a certain amount of time. 
+  - The player will only have this ability once every few minutes and there will be a cool down period
+- One race should be able to scan adjacent squares and know what race a player is the lambda hunter!
