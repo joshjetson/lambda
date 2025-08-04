@@ -23,8 +23,6 @@ class BootStrap {
 //        bootstrapService.createFirstPage()
         
         println "Lambda: A Digital Entities Game initialized"
-        println "Telnet server running on port 8181"
-        println "Connect via: telnet localhost 8181"
     }
     
     def destroy = {

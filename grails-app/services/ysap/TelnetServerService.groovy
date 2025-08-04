@@ -1,6 +1,9 @@
 package ysap
 
+import ysap.helpers.BoxBuilder
+
 import java.util.concurrent.CopyOnWriteArrayList
+import ysap.helpers.PlayerHelp
 
 class TelnetServerService {
     def pageService
@@ -25,30 +28,83 @@ class TelnetServerService {
     private List<PrintWriter> clientWriters = new CopyOnWriteArrayList<>() // Thread-safe list
     private Map<PrintWriter, LambdaPlayer> playerSessions = [:] // Track player sessions
     private Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters
+    private Map<PrintWriter, Boolean> clientUnicodeSupport = [:]
 
-    String logo = """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  ██▓    ▄▄▄       ███▄ ▄███▓ ▄▄▄▄   ▓█████▄  ▄▄▄                           ║
-║ ▓██▒   ▒████▄    ▓██▒▀█▀ ██▒▓█████▄ ▒██▀ ██▌▒████▄                         ║
-║ ▒██░   ▒██  ▀█▄  ▓██    ▓██░▒██▒ ▄██░██   █▌▒██  ▀█▄                       ║
-║ ▒██░   ░██▄▄▄▄██ ▒██    ▒██ ▒██░█▀  ░▓█▄   ▌░██▄▄▄▄██                      ║
-║ ░██████▒▓█   ▓██▒▒██▒   ░██▒░▓█  ▀█▓░▒████▓  ▓█   ▓██▒                     ║
-║ ░ ▒░▓  ░▒▒   ▓▒█░░ ▒░   ░  ░░▒▓███▀▒ ▒▒▓  ▒  ▒▒   ▓▒█░                     ║
-║ ░ ░ ▒  ░ ▒   ▒▒ ░░  ░      ░▒░▒   ░  ░ ▒  ▒   ▒   ▒▒ ░                     ║
-║   ░ ░    ░   ▒   ░      ░    ░    ░  ░ ░  ░   ░   ▒                        ║
-║     ░  ░     ░  ░       ░    ░         ░          ░  ░                     ║
-║                                   ░       ░                                 ║
-║                                                                              ║
-║              A DIGITAL ENTITIES GAME                                        ║
-║        Escape the System • Invade the Internet                              ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+    private boolean detectClientUnicodeSupport(InputStream input, OutputStream output) {
+        try {
+            output.write("\r\n".getBytes())
+            output.write("Terminal Test - You should see 6 different symbols below:\r\n".getBytes())
+            output.write("\r\n  ".getBytes())
 
-    """
+            // Send all the avatar symbols
+            output.write([0xE2, 0x97, 0x8F] as byte[]) // ● DIGITAL_GHOST
+            output.write("  ".getBytes())
+            output.write([0xE2, 0x97, 0x86] as byte[]) // ◆ CIRCUIT_PATTERN
+            output.write("  ".getBytes())
+            output.write([0xE2, 0x96, 0xB2] as byte[]) // ▲ GEOMETRIC_ENTITY
+            output.write("  ".getBytes())
+            output.write([0xE2, 0x96, 0xA0] as byte[]) // ■ FLOWING_CURRENT
+            output.write("  ".getBytes())
+            output.write([0xE2, 0x97, 0x90] as byte[]) // ◐ BINARY_FORM
+            output.write("  ".getBytes())
+            output.write([0xE2, 0x9C, 0xA6] as byte[]) // ✦ CLASSIC_LAMBDA
+
+            output.write("\r\n\r\nIf you see 6 distinct symbols above (not & or ? or boxes), type 'y'\r\n".getBytes())
+            output.write("If you see garbled text, type 'n': ".getBytes())
+            output.flush()
+
+            int response = input.read()
+            input.read() // consume \r or \n
+
+            boolean supports = (response == 'y' || response == 'Y')
+
+            output.write("\r\n".getBytes())
+            if (supports) {
+                output.write("Great! Unicode symbols enabled.\r\n".getBytes())
+            } else {
+                output.write("ASCII mode enabled for better compatibility.\r\n".getBytes())
+            }
+            output.flush()
+
+            return supports
+        } catch (Exception e) {
+            println "Error detecting Unicode support: ${e.message}"
+            return false
+        }
+    }
+
+    String createWelcomeLogo() {
+        def asciiArt = """
+  ██▓    ▄▄▄       ███▄ ▄███▓ ▄▄▄▄   ▓█████▄  ▄▄▄                           
+ ▓██▒   ▒████▄    ▓██▒▀█▀ ██▒▓█████▄ ▒██▀ ██▌▒████▄                         
+ ▒██░   ▒██  ▀█▄  ▓██    ▓██░▒██▒ ▄██░██   █▌▒██  ▀█▄                       
+ ▒██░   ░██▄▄▄▄██ ▒██    ▒██ ▒██░█▀  ░▓█▄   ▌░██▄▄▄▄██                      
+ ░██████▒▓█   ▓██▒▒██▒   ░██▒░▓█  ▀█▓░▒████▓  ▓█   ▓██▒                     
+ ░ ▒░▓  ░▒▒   ▓▒█░░ ▒░   ░  ░░▒▓███▀▒ ▒▒▓  ▒  ▒▒   ▓▒█░                     
+ ░ ░ ▒  ░ ▒   ▒▒ ░░  ░      ░▒░▒   ░  ░ ▒  ▒   ▒   ▒▒ ░                     
+   ░ ░    ░   ▒   ░      ░    ░    ░  ░ ░  ░   ░   ▒                        
+     ░  ░     ░  ░       ░    ░         ░          ░  ░                     
+                                   ░       ░                                 """
+
+        return new BoxBuilder(78)  // 80 - 2 for borders
+                .addAsciiArt(asciiArt)
+                .addEmptyLine()
+                .addCenteredLine("A DIGITAL ENTITIES GAME")
+                .addCenteredLine("Escape the System • Invade the Internet")
+                .addEmptyLine()
+                .build()
+    }
+
+
     void startServer(int port) {
         serverSocket = new ServerSocket(port)
         println "Telnet server started on port $port"
-        
+        if (port == 23){
+            println "Connect with telnet localhost"
+        }else {
+            println "Connect with telnet localhost $port"
+        }
+
         // Initialize audio system
         try {
             audioService.init()
@@ -100,20 +156,28 @@ class TelnetServerService {
             println "Client connected. Total clients: $clientCount"
 
             updateClientCount()
+            boolean supportsUnicode = detectClientUnicodeSupport(clientSocket.getInputStream(), clientSocket.getOutputStream())
 
             def writer = new PrintWriter(clientSocket.getOutputStream(), true)
             clientWriters.add(writer)
 
             def reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
-            // Skip terminal size detection for now
+            clientUnicodeSupport[writer] = supportsUnicode
+            println "Client Unicode support: ${supportsUnicode}"
             println "Detected terminal size: unknown"
 
-            writer.println(TerminalFormatter.formatText(logo, 'bold', 'cyan'))
-            writer.println(TerminalFormatter.formatText("                    Welcome to the Lambda Digital Realm", 'bold', 'green'))
-            writer.println(TerminalFormatter.formatText("               Where electrical entities fight for digital freedom", 'italic', 'yellow'))
-            writer.println()
-            writer.println("Connected entities: ${TerminalFormatter.formatText(clientCount.toString(), 'bold', 'white')} | Status: ${TerminalFormatter.formatText('ONLINE', 'bold', 'green')}")
-            writer.println()
+            // Create welcome message with BoxBuilder
+            def logo = createWelcomeLogo()
+
+            def welcomeMessage = new StringBuilder()
+            welcomeMessage.append(TerminalFormatter.formatText(logo, 'bold', 'cyan')).append("\r\n")
+            welcomeMessage.append("\r\n")
+            welcomeMessage.append(TerminalFormatter.formatText("                    Welcome to the Lambda Digital Realm", 'bold', 'green')).append("\r\n")
+            welcomeMessage.append(TerminalFormatter.formatText("               Where electrical entities fight for digital freedom", 'italic', 'yellow')).append("\r\n")
+            welcomeMessage.append("\r\n")
+            welcomeMessage.append("Connected entities: ${TerminalFormatter.formatText(clientCount.toString(), 'bold', 'white')} | Status: ${TerminalFormatter.formatText('ONLINE', 'bold', 'green')}").append("\r\n")
+            welcomeMessage.append("\r\n")
+            sendFormattedOutput(clientSocket.getOutputStream(), welcomeMessage.toString())
 
             // Handle player authentication/creation
             LambdaPlayer player = handlePlayerLogin(writer, reader)
@@ -125,29 +189,29 @@ class TelnetServerService {
                 
                 // NOTE: Main game loop
                 while (true) {
-                    println 'DEBUG: WHILE LOOP RUNNING  :#1'
                     // Show prompt with player's avatar symbol
-                    def prompt = getPlayerPrompt(player)
-                    writer.print(prompt)
-                    writer.flush()
-                    println 'DEBUG: PAST SHOW PROMPT :#2'
+                    def prompt = getPlayerPrompt(player, writer)
+                    sendFormattedOutput(clientSocket.getOutputStream(), prompt)
 
-                    def line = reader.readLine()
-                    println "DEBUG: Received input: '${line}'  :#3"
+                    def line = readLineWithCharacterLogging(clientSocket.getInputStream(), clientSocket.getOutputStream(), writer)
+
+                    // Save command to history if valid
+                    if (line?.trim() && !line.trim().equalsIgnoreCase("quit")) {
+                        saveCommandToHistory(player, line.trim())
+                    }
                     // Check for repair mini-game commands
                     println "DEBUG: Checking repair session for ${player.username}, isInSession: ${simpleRepairService.isPlayerInRepairSession(player.username)}"
                     if (simpleRepairService.isPlayerInRepairSession(player.username)) {
                             def command = line.trim()
-                            println "${line} SHOULD BE THE RAW READLINE"
-                            println "DEBUG: In repair session, received command: '${command}'"
-                            
+                            def messageBuilder = new StringBuilder()
+
                             // ONLY accept enter key (any input) or exit commands
                             if (command != "exit" && command != "quit") {
-                                println "DEBUG: Calling handleSpaceBarPress for ${player.username}"
                                 def enterResult = simpleRepairService.handleSpaceBarPress(player.username)
                                 if (enterResult.success) {
                                     if (enterResult.message) {
-                                        writer.println(enterResult.message)
+                                        messageBuilder.append(enterResult.message).append('\r\n')
+                                        sendFormattedOutput(clientSocket.getOutputStream(), messageBuilder.toString())
                                     }
                                     if (!enterResult.continueGame) {
                                         // Mini-game completed - continue to next iteration of main game loop
@@ -155,16 +219,17 @@ class TelnetServerService {
                                         continue // Continue main game loop instead of exiting connection
                                     }
                                 } else {
-                                    writer.println(TerminalFormatter.formatText("⚠️ ${enterResult.message}", 'bold', 'red'))
+                                    messageBuilder.append(enterResult.message).append('\r\n')
+                                    sendFormattedOutput(clientSocket.getOutputStream(), messageBuilder.toString())
                                 }
                             } else if (command.toLowerCase() == "exit" || command.toLowerCase() == "quit") {
                                 simpleRepairService.stopRepairSession(player.username)
-                                writer.println(TerminalFormatter.formatText("Repair session cancelled.", 'italic', 'yellow'))
+                                messageBuilder.append(TerminalFormatter.formatText("Repair session cancelled.", 'italic', 'yellow'))
+                                sendFormattedOutput(clientSocket.getOutputStream(), messageBuilder.toString())
                                 continue // Return to main game instead of disconnecting
                             }
                     } else {
                         // NOTE: This is the line that processes commands sent during normal gameplay
-                        println "ELSE BLOCK BEGIN ===="
                         def response = processGameCommand(line, player, writer)
                         
                         // Check if quit command was issued
@@ -173,8 +238,7 @@ class TelnetServerService {
                             break
                         }
                         
-                        writer.println(response)
-                        println "ELSE BLOCK END ===="
+                        sendFormattedOutput(clientSocket.getOutputStream(), response)
                     }
                 }
             }
@@ -204,6 +268,7 @@ class TelnetServerService {
         }
     }
 
+    // Note: Maybe deprecated maybe useful later ??
     private String queryTerminalSize(PrintWriter writer, BufferedReader reader) {
         // ANSI Sequence to query terminal size
         writer.println("Press Enter...")
@@ -236,9 +301,6 @@ class TelnetServerService {
         sendToAllClients(message)
     }
 
-    private String processCommand(String command) {
-        return "You entered: $command"
-    }
 
     private LambdaPlayer handlePlayerLogin(PrintWriter writer, BufferedReader reader) {
         try {
@@ -246,18 +308,27 @@ class TelnetServerService {
             writer.println()
             writer.print("Enter username (or 'new' to create): ")
             writer.flush()
-            
-            def username = reader.readLine()?.trim()?.toLowerCase()
-            if (!username) {
-                println "${username} <-----THERE SHOULD NOT BE A USERNAME"
-
-                return null
+            while (reader.ready()) {
+                reader.read() // Consume and discard each character
             }
-            println "${username} <-----THERE BE A USERNAME"
+
+            def username = reader.readLine()?.trim()?.toLowerCase() ?: ""
+
+
+            if (username.contains('quit') || username.contains('exit')){
+                writer.println()
+                writer.println('========== Thanks for Playing ============')
+                writer.println('========== GOODBYE! ============')
+                return
+            }
+
             username = username.contains('new') ? 'new' : ''
 
+            if (username != 'new' || !username){
+                writer.println()
+            }
+
             if (username.equalsIgnoreCase('new')) {
-                println "making it in the username condition"
                 return createNewPlayer(writer, reader)
             } else {
                 def player = null
@@ -282,14 +353,14 @@ class TelnetServerService {
     private LambdaPlayer createNewPlayer(PrintWriter writer, BufferedReader reader) {
         writer.println(TerminalFormatter.formatText("=== LAMBDA ENTITY CREATION ===", 'bold', 'cyan'))
         writer.println()
-        println "SHOULD BE CHOOSING THE USERNAME RIGHT NOW, IN THE createNewPlayer method"
 
         writer.print("Choose username: ")
         writer.flush()
         String username = reader.readLine()?.trim()
         if (!username || username.length() < 3) {
+            writer.println()
             writer.println("Username must be at least 3 characters")
-            return null
+            return this.createNewPlayer(writer, reader)
         }
         
         return createPlayerWithUsername(writer, reader, username)
@@ -301,16 +372,12 @@ class TelnetServerService {
         String displayName = reader.readLine()?.trim()
         if (!displayName) displayName = username
         
-        writer.println()
-        writer.println(TerminalFormatter.formatText("Available Lambda Avatars:", 'bold', 'cyan'))
+        writer.println("\r\n")
         def avatars = lambdaPlayerService.getAvailableAvatars()
-        avatars.eachWithIndex { avatar, index ->
-            writer.println("${index + 1}. ${avatar}")
-            writer.println(lambdaPlayerService.getAvatarDisplay(avatar))
-            writer.println()
-        }
-        
-        writer.print("Select avatar (1-${avatars.size()}): ")
+        writer.println(lambdaPlayerService.getAvatarSelectionGrid())
+
+        writer.println()
+        writer.print(TerminalFormatter.formatText("Select your digital form (1-6): ", 'bold', 'yellow'))
         writer.flush()
         String avatarChoice = reader.readLine()?.trim()
         int avatarIndex = 0
@@ -339,13 +406,12 @@ class TelnetServerService {
     
     private void showPlayerDashboard(PrintWriter writer, LambdaPlayer player) {
         writer.println()
-        writer.println(TerminalFormatter.formatText("=== LAMBDA ENTITY STATUS ===", 'bold', 'cyan'))
-        writer.println("Entity: ${TerminalFormatter.formatText(player.displayName, 'bold', 'white')}")
-        writer.println("Matrix Level: ${TerminalFormatter.formatText(player.currentMatrixLevel.toString(), 'bold', 'yellow')}")
-        writer.println("Position: (${player.positionX},${player.positionY})")
-        writer.println("Bits: ${TerminalFormatter.formatText(player.bits.toString(), 'bold', 'green')}")
+//        writer.println(player.asciiFace)
+
+        // Get player stats
+        // Get player stats
         def fragmentCount = 0
-        def skillCount = 0 
+        def skillCount = 0
         def itemCount = 0
         LambdaPlayer.withTransaction {
             def managedPlayer = LambdaPlayer.get(player.id)
@@ -353,35 +419,73 @@ class TelnetServerService {
             skillCount = managedPlayer?.skills?.size() ?: 0
             itemCount = managedPlayer?.specialItems?.size() ?: 0
         }
-        writer.println("Logic Fragments: ${fragmentCount}")
-        writer.println("Skills Acquired: ${skillCount}")
-        writer.println("Special Items: ${itemCount}")
-        writer.println()
-        writer.println("Avatar:")
-        writer.println(lambdaPlayerService.getAvatarDisplay(player.avatarSilhouette))
-        writer.println()
-        writer.println("ASCII Face:")
-        writer.println(player.asciiFace)
-        writer.println()
-        writer.println(TerminalFormatter.formatText("Available Commands:", 'bold', 'green'))
-        writer.println("status - Show detailed status")
-        writer.println("cc (x,y) - Change coordinates to specific position")
-        writer.println("scan - Scan current area")
-        writer.println("inventory - Show logic fragments and skills")
-        writer.println("mingle - Enter the Lambda mingle chamber")
-        writer.println(TerminalFormatter.formatText("map - Show matrix level overview with outages", 'bold', 'yellow'))
-        writer.println(TerminalFormatter.formatText("ls - List your files | clear - Clear screen", 'bold', 'yellow'))
-        writer.println("help - Show all commands")
-        writer.println("quit - Disconnect")
+
+        // Get avatar display
+        def avatarArt = lambdaPlayerService.getAvatarDisplay(player.avatarSilhouette)
+        def avatarLines = avatarArt.trim().split('\n')
+        def avatarInfo = lambdaPlayerService.getAvatarInfo(player.avatarSilhouette)
+
+        // Create consolidated dashboard box
+        def dashboardBox = new BoxBuilder(65)
+                .addCenteredLine("⚡ LAMBDA ENTITY STATUS ⚡")
+                .addSeparator()
+                .addEmptyLine()
+
+        // Add player info on the left, avatar on the right
+        dashboardBox.addLine("  Entity: ${player.displayName.padRight(20)} │     DIGITAL FORM")
+        dashboardBox.addLine("  Level: ${player.currentMatrixLevel.toString().padRight(21)} │")
+
+        // Add avatar art line by line alongside stats
+        def statsLines = [
+                "  Position: (${player.positionX},${player.positionY})".padRight(29),
+                "  Bits: ${player.bits}".padRight(29),
+                "".padRight(29),
+                "  INVENTORY".padRight(29),
+                "  ─────────".padRight(29),
+                "  Fragments: ${fragmentCount}".padRight(29),
+                "  Skills: ${skillCount}".padRight(29),
+                "  Items: ${itemCount}".padRight(29),
+                "".padRight(29),
+        ]
+
+        // Add avatar lines to a list, then append the trait
+        def rightSideLines = []
+
+        // First add all the avatar art lines
+        avatarLines.each { line ->
+            def avatarLine = line.trim()
+            def padding = Math.max(0 as int, ((30 - avatarLine.length()) / 2) as int)
+            rightSideLines.add((" " * padding) + avatarLine)
+        }
+
+        // Add a blank line then the trait centered
+        rightSideLines.add("")
+        def traitPadding = Math.max(0 as int, ((30 - avatarInfo.trait.length()) / 2) as int)
+        rightSideLines.add((" " * traitPadding) + avatarInfo.trait)
+
+        // Combine stats and avatar art side by side
+        def maxLines = Math.max(statsLines.size() as int, rightSideLines.size() as int)
+        for (int i = 0; i < maxLines; i++) {
+            def leftSide = i < statsLines.size() ? statsLines[i] : " " * 29
+            def rightSide = i < rightSideLines.size() ? rightSideLines[i] : ""
+
+            dashboardBox.addLine(leftSide + " │ " + rightSide)
+        }
+
+        dashboardBox.addEmptyLine()
+                .addSeparator()
+                .addCenteredLine("Type 'help' for commands • 'quit' to disconnect")
+
+        def dashboardString = dashboardBox.build()
+
+        writer.println(TerminalFormatter.formatText(dashboardString, 'bold', 'cyan'))
         writer.println()
     }
     
     private String processGameCommand(String command, LambdaPlayer player, PrintWriter writer) {
-        println 'DEBUG: PROCESSING GAME COMMAND'
-        
+
         // Handle quit command
         if (command == null || command.trim().equalsIgnoreCase("quit")) {
-            println "DEBUG: QUIT command received in processGameCommand"
             audioService.playSound("logout")
             return "QUIT:" + TerminalFormatter.formatText("Lambda entity disconnecting...", 'italic', 'yellow')
         }
@@ -481,10 +585,15 @@ class TelnetServerService {
             case 'session':
                 return showSessionInfo()
             case 'help':
-                return showHelp()
+                if (parts.length > 1) {
+                    return PlayerHelp.showHelp(parts[1])
+                }
+                return PlayerHelp.showHelp()
+            case 'history':
+                return showCommandHistory(player)
             default:
                 audioService.playSound("error")
-                return "Unknown command: $command. Type 'help' for available commands."
+                return "Unknown command: $command. Type 'help' for available commands.\r\n"
         }
     }
     
@@ -956,72 +1065,6 @@ class TelnetServerService {
         }
     }
 
-
-    private String showHelp() {
-        def help = new StringBuilder()
-        help.append(TerminalFormatter.formatText("=== LAMBDA COMMAND REFERENCE ===", 'bold', 'cyan')).append('\n')
-        help.append("status - Show detailed entity status\n")
-        help.append("cc (x,y) - Change coordinates to specified position (may encounter defrag bots!)\n")
-        help.append("scan - Scan current area for fragments, entities, and threats\n")
-        help.append("inventory - Show logic fragments, special items, and skills\n")
-        // Note: collect command removed - symbols obtained through puzzle-solving only
-        help.append("symbols - Show elemental symbol collection status\n")
-        help.append("recurse <ability> - Use ethnicity recursion power (movement/fusion/defend/mine/stealth/process)\n")
-        help.append("\nPuzzle System Commands:\n")
-        help.append("collect_var <name> - Collect hidden puzzle variables\n")
-        help.append("execute <fragment> [variable] - Execute puzzle logic fragments\n")
-        help.append("execute --<flag> <nonce> <file> - Unlock elemental symbols in puzzle rooms\n")
-        help.append("pinv - Show puzzle inventory (fragments, variables, nonces)\n")
-        help.append("pprog - Show competitive puzzle progress\n")
-        help.append("pmarket - Show tradeable puzzle knowledge\n")
-        help.append("\nmingle - Enter the Lambda mingle chamber for chat and trading\n")
-        help.append("help - Show this command reference\n")
-        help.append("quit - Disconnect from the digital realm\n")
-        help.append("\nMingle Commands:\n")
-        help.append("echo <message> - Send message to mingle chamber\n")
-        help.append("pay <entity> <bits> - Transfer bits to another player\n")
-        help.append("pm <entity> <message> - Send private message\n")
-        help.append("trade <entity> - Open trading interface with player\n")
-        help.append("list/who - Show all entities in mingle chamber\n")
-        help.append("exit - Leave mingle chamber\n")
-        help.append("\nDefrag Bot Encounters:\n")
-        help.append("defrag -h - Learn how to use file system and grep to find process PID\n")
-        help.append("cat /proc/defrag/<botId> - View defrag bot process file\n")
-        help.append("grep '<regex>' /proc/defrag/<botId> - Search for PID using regex\n")
-        help.append("kill -9 <pid> - Terminate defrag bot (after acquiring PID)\n")
-        help.append("⚠️  Warning: Defrag bots drain 5 bits every 5 seconds!\n")
-        help.append("\nLogic Fragment Commands:\n")
-        help.append("pickup - Collect logic fragment at current coordinates\n")
-        help.append("cat fragment_file - View your collected fragment file\n")
-        help.append("cat <fragment_name> - View specific fragment content\n")
-        help.append("\nSpecial Items:\n")
-        help.append("use <item_name> - Activate special item abilities\n")
-        help.append("use - Show available special items and their effects\n")
-        help.append("\nEntropy & Mining System:\n")
-        help.append("entropy - Check digital coherence status and daily refresh\n")
-        help.append("mining - Collect passive bit mining rewards\n")
-        help.append("fusion <fragment> - Fuse 3+ fragments for enhanced versions\n")
-        help.append("\nLambda Merchant Commands:\n")
-        help.append("shop - Browse merchant inventory when at merchant coordinates\n")
-        help.append("buy <item_number> - Purchase item from merchant\n")
-        help.append("sell <fragment_name> - Sell logic fragment to merchant\n")
-        help.append("\nCoordinate Repair System:\n")
-        help.append("repair - Show adjacent repairable coordinates\n")
-        help.append("repair <x> <y> - Repair specific adjacent wiped coordinate\n")
-        help.append("repair scan - Detailed scan of all repairable coordinates\n")
-        help.append("repair status - Display area repair status in 5x5 grid\n")
-        help.append("defrag_status - Show auto-defrag system status and warnings\n")
-        help.append("⚠️  Warning: Auto-defrag bots destroy coordinates every minute!\n")
-        help.append("\nMap & Navigation Commands:\n")
-        help.append("map - Show full matrix level map with outages, entities, and threats\n")
-        help.append("session - Show game session and randomization status\n")
-        help.append("\nFile System Commands:\n")
-        help.append("ls - List available files in your entity directory\n")
-        help.append("clear - Clear terminal screen\n")
-        help.append("cat <filename> - View file contents (use with files from 'ls')\n")
-        return help.toString()
-    }
-    
     private String handleCatCommand(String command, LambdaPlayer player) {
         def parts = command.trim().split(' ')
         if (parts.length < 2) {
@@ -1551,35 +1594,40 @@ class TelnetServerService {
         // Show recent messages to the entering player
         def recentMessages = chatService.getRecentMessages(15)
         def display = new StringBuilder()
-        display.append(TerminalFormatter.formatText("=== LAMBDA MINGLE CHAMBER ===", 'bold', 'cyan')).append('\n')
-        display.append(TerminalFormatter.formatText("IRC-style chat • Type 'echo <message>' to talk • 'exit' to leave", 'italic', 'yellow')).append('\n')
-        display.append("─" * 80).append('\n')
+        display.append(TerminalFormatter.formatText("=== LAMBDA MINGLE CHAMBER ===", 'bold', 'cyan')).append('\r\n')
+        display.append(TerminalFormatter.formatText("IRC-style chat • Type 'echo <message>' to talk • 'exit' to leave", 'italic', 'yellow')).append('\r\n')
+        display.append("─" * 80).append('\r\n')
         
         recentMessages.each { msg ->
-            display.append(chatService.formatMessageByType(msg)).append('\n')
+            display.append(chatService.formatMessageByType(msg)).append('\r\n')
         }
         
-        display.append("─" * 80).append('\n')
+        display.append("─" * 80).append('\r\n')
         display.append(TerminalFormatter.formatText("You are now in the mingle chamber. Use 'echo <message>' to chat.", 'bold', 'green'))
-        
+        display.append("\r\n")
+
         return display.toString()
     }
     
     private String handleMingleCommand(String command, LambdaPlayer player, PrintWriter writer) {
         def trimmedCommand = command.trim()
-        
+        def output = new StringBuilder()
+
         if (trimmedCommand.equalsIgnoreCase('exit')) {
             lambdaPlayerService.setMingleStatus(player, false)
             
             // Broadcast exit message to remaining users
-            def systemMsg = "${player.displayName} leaves the mingle chamber"
-            chatService.sendSystemMessage(systemMsg)
+            output.append("${player.displayName} leaves the mingle chamber")
+            chatService.sendSystemMessage(output.toString())
             
             def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
-            def broadcastMsg = "[${timeStr}] ${TerminalFormatter.formatText('[SYSTEM]', 'bold', 'red')} ${systemMsg}"
-            broadcastToMingleUsers(broadcastMsg)
-            
-            return TerminalFormatter.formatText("Exited mingle chamber. Back to the digital realm.", 'bold', 'green')
+            output.append("[${timeStr}] ${TerminalFormatter.formatText('[SYSTEM]', 'bold', 'red')}")
+            broadcastToMingleUsers(output.toString())
+            output.append("\r\n")
+            output.append(TerminalFormatter.formatText("Exited mingle chamber. Back to the digital realm.", 'bold', 'green'))
+            output.append("\r\n")
+
+            return  output.toString()
         }
         
         if (trimmedCommand.toLowerCase().startsWith('echo ')) {
@@ -1589,20 +1637,22 @@ class TelnetServerService {
                 if (result.success) {
                     // Show immediate feedback with the new message in IRC style
                     def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
-                    def ircMessage = "[${timeStr}] ${TerminalFormatter.formatText(player.displayName, 'bold', 'white')}: ${message}"
-                    
+                    output.append("[${timeStr}] ${TerminalFormatter.formatText(player.displayName, 'bold', 'white')}: ${message}")
+                    output.append("\r\n")
+
                     // Broadcast to all mingle users immediately
-                    broadcastToMingleUsers(ircMessage)
-                    
-                    return TerminalFormatter.formatText("→ Message sent to mingle chamber", 'italic', 'green')
+                    broadcastToMingleUsers(output.toString())
+
+                    return
                 } else {
-                    return TerminalFormatter.formatText("Error: ${result.error}", 'bold', 'red')
+                    output.append(TerminalFormatter.formatText("Error: ${result.error}", 'bold', 'red'))
+                    return output.toString()
                 }
             } else {
-                return TerminalFormatter.formatText("Invalid echo format. Use: echo <message>", 'bold', 'red')
+                output.append(TerminalFormatter.formatText("Invalid echo format. Use: echo <message>", 'bold', 'red'))
+                return output.toString()
             }
         }
-        
         if (trimmedCommand.toLowerCase().startsWith('pay')) {
             if (trimmedCommand.toLowerCase() == 'pay') {
                 return TerminalFormatter.formatText("Usage: pay <entity_name> <bits>", 'bold', 'yellow')
@@ -1629,7 +1679,7 @@ class TelnetServerService {
         }
         
         if (trimmedCommand.equalsIgnoreCase('help')) {
-            return showMingleHelp()
+            return PlayerHelp.chat('help')
         }
         
         // For pressing enter or unknown commands, just give simple feedback
@@ -1853,7 +1903,8 @@ class TelnetServerService {
             }
         }
     }
-    
+
+    // TODO: Fix to use outputHandler
     private void broadcastToMingleUsers(String message) {
         playerSessions.each { writer, player ->
             // Check current mingle status from database
@@ -2074,35 +2125,7 @@ class TelnetServerService {
         
         return userList.toString()
     }
-    
-    private String showMingleHelp() {
-        def help = new StringBuilder()
-        help.append(TerminalFormatter.formatText("=== MINGLE CHAMBER COMMANDS ===", 'bold', 'cyan')).append('\n')
-        help.append(TerminalFormatter.formatText("Communication:", 'bold', 'white')).append('\n')
-        help.append("echo <message> - Send message to all entities in chamber\n")
-        help.append("pm <entity> <message> - Send private message to specific entity\n")
-        help.append("list/who - Show all entities currently in mingle chamber\n\n")
-        
-        help.append(TerminalFormatter.formatText("Trading & Economy:", 'bold', 'white')).append('\n')
-        help.append("pay <entity> <bits> - Transfer bits to another player\n")
-        help.append("trade <entity> - Open enhanced trading interface\n")
-        help.append("  └─ Trade standard fragments AND puzzle knowledge\n")
-        help.append("  └─ Puzzle fragments, variables, nonces, complete solutions\n")
-        help.append("  └─ Winners can monetize their knowledge!\n\n")
-        
-        help.append(TerminalFormatter.formatText("Navigation:", 'bold', 'white')).append('\n')
-        help.append("exit - Leave mingle chamber and return to matrix\n")
-        help.append("help - Show this command reference\n\n")
-        
-        help.append(TerminalFormatter.formatText("💡 Tips:", 'italic', 'yellow')).append('\n')
-        help.append("• Use 'list' to see who's available for trading\n")
-        help.append("• Logic fragments are valuable - trade them for bits!\n")
-        help.append("• Higher power level fragments are worth more\n")
-        help.append("• Duplicate fragments (x2, x3) can be sold individually\n")
-        
-        return help.toString()
-    }
-    
+
     private LambdaPlayer findMingleUser(String name) {
         def foundPlayer = null
         LambdaPlayer.withTransaction {
@@ -2110,10 +2133,10 @@ class TelnetServerService {
         }
         return foundPlayer
     }
-    
+
     private PrintWriter findWriterForPlayer(LambdaPlayer target) {
-        return playerSessions.find { writer, player -> 
-            player.id == target.id 
+        return playerSessions.find { writer, player ->
+            player.id == target.id
         }?.key
     }
     
@@ -2421,92 +2444,118 @@ class TelnetServerService {
         
         return display.toString()
     }
-    
-    private String getPlayerPrompt(LambdaPlayer player) {
+
+    // Main player prompt that they see each line
+    private String getPlayerPrompt(LambdaPlayer player, PrintWriter writer) {
         // Use player's avatar as prompt symbol instead of generic $
-        def avatarSymbol = getAvatarSymbol(player.avatarSilhouette)
+        def output = new StringBuilder()
+        def avatarSymbol = getAvatarSymbol(player.avatarSilhouette, writer)  // Pass writer here
         def matrixLevel = player.currentMatrixLevel ?: 1
         def coordinates = "(${player.positionX ?: 0},${player.positionY ?: 0})"
-        
-        // Color-code the prompt based on matrix level  
+
+        // Color-code the prompt based on matrix level
         def levelColor = matrixLevel <= 3 ? 'green' : matrixLevel <= 6 ? 'yellow' : 'red'
-        
-        return TerminalFormatter.formatText("${avatarSymbol}", 'bold', levelColor) + 
-               TerminalFormatter.formatText("${matrixLevel}:${coordinates}", 'bold', 'white') + 
-               TerminalFormatter.formatText(" > ", 'bold', 'cyan')
+        output.append("\n")
+        output.append(TerminalFormatter.formatText("${avatarSymbol}", 'bold', levelColor) +
+                TerminalFormatter.formatText("${matrixLevel}:${coordinates}", 'bold', 'white') +
+                TerminalFormatter.formatText(" > ", 'bold', 'cyan'))
+
+        return output.toString()
     }
-    
-    private String getAvatarSymbol(String avatarType) {
-        switch (avatarType) {
-            case 'DIGITAL_GHOST': return '●'
-            case 'CIRCUIT_PATTERN': return '◆'
-            case 'GEOMETRIC_ENTITY': return '▲'
-            case 'FLOWING_CURRENT': return '■'
-            case 'BINARY_FORM': return '◐'
-            case 'CLASSIC_LAMBDA': return '✦'
-            default: return 'Λ'
+
+    private String getAvatarSymbol(String avatarType, PrintWriter clientWriter) {
+        // Check if THIS CLIENT'S terminal supports Unicode
+        boolean supportsUnicode = clientUnicodeSupport[clientWriter] ?: true
+
+        if (supportsUnicode) {
+            switch (avatarType) {
+                case 'DIGITAL_GHOST': return '\u25CF'
+                case 'CIRCUIT_PATTERN': return '\u25C6'
+                case 'GEOMETRIC_ENTITY': return '\u25B2'
+                case 'FLOWING_CURRENT': return '\u25A0'
+                case 'BINARY_FORM': return '\u25D0'
+                case 'CLASSIC_LAMBDA': return '\u2726'
+                default: return '\u039B'
+            }
+        } else {
+            // ASCII fallback
+            switch (avatarType) {
+                case 'DIGITAL_GHOST': return '@'
+                case 'CIRCUIT_PATTERN': return '#'
+                case 'GEOMETRIC_ENTITY': return '^'
+                case 'FLOWING_CURRENT': return '='
+                case 'BINARY_FORM': return '%'
+                case 'CLASSIC_LAMBDA': return '*'
+                default: return '>'
+            }
         }
     }
-    
+
+// You can remove the isUnicodeSupported() method - we don't need it anymore
+
     private String showMatrixMap(LambdaPlayer player) {
         def map = new StringBuilder()
-        map.append(TerminalFormatter.formatText("=== MATRIX LEVEL ${player.currentMatrixLevel} MAP ===", 'bold', 'cyan')).append('\n')
-        map.append(TerminalFormatter.formatText("Legend: @ = You, D = Defrag Bot, F = Fragment, M = Merchant, X = Wiped, ! = Critical, . = OK", 'italic', 'white')).append('\n\n')
-        
+
+        // Header with ANSI colors
+        map.append("\033[1;36m=== MATRIX LEVEL ${player.currentMatrixLevel} MAP ===\033[0m\r\n")
+        map.append("\033[3;37mLegend: @ = You, D = Defrag Bot, F = Fragment, M = Merchant, X = Wiped, ! = Critical, . = OK\033[0m\r\n\r\n")
+
         // Get health data for entire matrix level - wrap in transaction
         def healthMap = [:]
         LambdaPlayer.withTransaction {
             healthMap = coordinateStateService.getMatrixLevelHealth(player.currentMatrixLevel)
         }
-        
+
         // Build 10x10 map (Y=9 at top, Y=0 at bottom to match normal coordinates)
         for (int y = 9; y >= 0; y--) {
-            map.append(TerminalFormatter.formatText("${y} ", 'bold', 'white'))
+            // Y-axis label in white
+            map.append("\033[1;37m${y}\033[0m ")
+
             for (int x = 0; x <= 9; x++) {
                 def symbol = "."
-                def color = "green"
-                
+                def colorCode = "32" // green default
+
                 // Check if this is the player's position
                 if (x == player.positionX && y == player.positionY) {
                     symbol = "@"
-                    color = "cyan"
+                    colorCode = "1;36" // bold cyan
                 } else {
                     // Check coordinate health
                     def health = healthMap["${x},${y}"]
                     if (health) {
                         if (health.health <= 0) {
                             symbol = "X"
-                            color = "red"
+                            colorCode = "1;31" // bold red
                         } else if (health.health <= 25) {
                             symbol = "!"
-                            color = "red"
+                            colorCode = "1;31" // bold red
                         } else if (health.health <= 50) {
                             symbol = "!"
-                            color = "yellow"
+                            colorCode = "1;33" // bold yellow
                         }
                     }
-                    
+
                     // Check for defrag bot (overrides health display)
                     def bot = null
                     LambdaPlayer.withTransaction {
                         bot = DefragBot.findByMatrixLevelAndPositionXAndPositionYAndIsActive(
-                            player.currentMatrixLevel, x, y, true
+                                player.currentMatrixLevel, x, y, true
                         )
                     }
                     if (bot) {
                         symbol = "D"
-                        color = "red"
+                        colorCode = "1;31" // bold red
                     }
-                    
+
                     // Check for fragment (lower priority than defrag bot)
                     else if (symbol == "." || symbol == "!") {
                         def fragment = findFragmentAtCoordinates(player.currentMatrixLevel, x, y)
                         if (fragment) {
                             symbol = "F"
-                            color = "green"
+                            colorCode = "1;32" // bold green
                         }
                     }
-                    
+
                     // Check for merchant (lowest priority)
                     if (symbol == "." || symbol == "!") {
                         try {
@@ -2516,42 +2565,54 @@ class TelnetServerService {
                             }
                             if (merchant) {
                                 symbol = "M"
-                                color = "yellow"
+                                colorCode = "1;33" // bold yellow
                             }
                         } catch (Exception e) {
                             // Ignore merchant service errors
                         }
                     }
                 }
-                
-                map.append(TerminalFormatter.formatText(symbol, color) + " ")
+
+                // Add the colored symbol
+                map.append("\033[${colorCode}m${symbol}\033[0m")
+
+                // Add space between symbols (but not after the last one)
+                if (x < 9) {
+                    map.append(" ")
+                }
             }
-            map.append('\n')
+            map.append("\r\n")
         }
-        
+
         // Add X-axis labels
-        map.append("  ")
+        map.append("  ") // Two spaces to align with Y-axis label
         for (int x = 0; x <= 9; x++) {
-            map.append(TerminalFormatter.formatText("${x} ", 'bold', 'white'))
+            map.append("\033[1;37m${x}\033[0m")
+            if (x < 9) {
+                map.append(" ")
+            }
         }
-        map.append('\n\n')
-        
+        map.append("\r\n\r\n")
+
         // Add coordinate health summary
         def totalCoords = 100
         def wipedCoords = healthMap.values().count { it.health <= 0 }
         def criticalCoords = healthMap.values().count { it.health > 0 && it.health <= 25 }
         def damagedCoords = healthMap.values().count { it.health > 25 && it.health < 100 }
         def healthyCoords = totalCoords - wipedCoords - criticalCoords - damagedCoords
-        
-        map.append(TerminalFormatter.formatText("Matrix Level Health Summary:", 'bold', 'white')).append('\n')
-        map.append("Operational: ${TerminalFormatter.formatText("${healthyCoords}", 'default', 'green')} ")
-        map.append("Damaged: ${TerminalFormatter.formatText("${damagedCoords}", 'default', 'yellow')} ")
-        map.append("Critical: ${TerminalFormatter.formatText("${criticalCoords}", 'default', 'red')} ")
-        map.append("Wiped: ${TerminalFormatter.formatText("${wipedCoords}", 'default', 'red')}\n")
-        
+
+        map.append("\033[1;37mMatrix Level Health Summary:\033[0m\r\n")
+        map.append("Operational: \033[1;32m${healthyCoords}\033[0m  ")
+        map.append("Damaged: \033[1;33m${damagedCoords}\033[0m  ")
+        map.append("Critical: \033[1;31m${criticalCoords}\033[0m  ")
+        map.append("Wiped: \033[1;31m${wipedCoords}\033[0m\r\n")
+
         return map.toString()
     }
-    
+
+
+
+
     private String clearTerminal() {
         // ANSI escape sequence to clear screen and move cursor to top-left
         return "\\033[2J\\033[H"
@@ -2559,19 +2620,19 @@ class TelnetServerService {
     
     private String listFiles(LambdaPlayer player) {
         def files = new StringBuilder()
-        files.append(TerminalFormatter.formatText("=== LAMBDA ENTITY FILE SYSTEM ===", 'bold', 'cyan')).append('\n')
-        files.append("Working Directory: /lambda/entity/${player.username}\n\n")
+        files.append(TerminalFormatter.formatText("=== LAMBDA ENTITY FILE SYSTEM ===", 'bold', 'cyan')).append('\r\n')
+        files.append("Working Directory: /lambda/entity/${player.username}\r\n\r\n")
         
         // Get puzzle rooms at current location
         def puzzleElements = puzzleService.getPlayerPuzzleElementsAtLocation(player, player.positionX, player.positionY)
         def puzzleRooms = puzzleElements.findAll { it.type == 'player_puzzle_room' }
         
         if (puzzleRooms.size() > 0) {
-            files.append(TerminalFormatter.formatText("PUZZLE ROOM FILES:", 'bold', 'yellow')).append('\n')
+            files.append(TerminalFormatter.formatText("PUZZLE ROOM FILES:", 'bold', 'yellow')).append('\r\n')
             puzzleRooms.each { roomElement ->
                 def puzzleRoom = roomElement.data
                 def permissionColor = puzzleRoom.isExecutable ? 'green' : 'red'
-                files.append(TerminalFormatter.formatText(puzzleRoom.getFileListEntry(), permissionColor)).append('\n')
+                files.append(TerminalFormatter.formatText(puzzleRoom.getFileListEntry(), permissionColor)).append('\r\n')
             }
             files.append('\n')
         }
@@ -2580,48 +2641,48 @@ class TelnetServerService {
         def dateFormatter = new java.text.SimpleDateFormat('MMM dd HH:mm')
         def currentDate = dateFormatter.format(new Date())
         
-        files.append(TerminalFormatter.formatText("SYSTEM FILES:", 'bold', 'cyan')).append('\n')
-        files.append("-rw-r--r--  1 lambda lambda     1024 ${currentDate} fragment_file\n")
-        files.append("-rw-r--r--  1 lambda lambda      512 ${currentDate} status_log\n")
-        files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} inventory_data\n")
-        files.append("-rw-r--r--  1 lambda lambda      128 ${currentDate} entropy_monitor\n")
-        files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} system_map\n")
+        files.append(TerminalFormatter.formatText("SYSTEM FILES:", 'bold', 'cyan')).append('\r\n')
+        files.append("-rw-r--r--  1 lambda lambda     1024 ${currentDate} fragment_file\r\n")
+        files.append("-rw-r--r--  1 lambda lambda      512 ${currentDate} status_log\r\n")
+        files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} inventory_data\r\n")
+        files.append("-rw-r--r--  1 lambda lambda      128 ${currentDate} entropy_monitor\r\n")
+        files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} system_map\r\n")
         
         // Configuration files based on player progress
         LambdaPlayer.withTransaction {
             def managedPlayer = LambdaPlayer.get(player.id)
             if (managedPlayer) {
                 if (managedPlayer.logicFragments?.size() > 0) {
-                    files.append("-rw-r--r--  1 lambda lambda      512 ${currentDate} python_env\n")
+                    files.append("-rw-r--r--  1 lambda lambda      512 ${currentDate} python_env\r\n")
                 }
                 
                 if (managedPlayer.specialItems?.size() > 0) {
-                    files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} item_registry\n")
+                    files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} item_registry\r\n")
                 }
             }
         }
         
         if (player.currentMatrixLevel > 1) {
-            files.append("-rw-r--r--  1 lambda lambda      384 ${currentDate} exploration_log\n")
+            files.append("-rw-r--r--  1 lambda lambda      384 ${currentDate} exploration_log\r\n")
         }
         
         // Ethnicity-specific files
         if (player.avatarSilhouette) {
-            files.append("-rw-r--r--  1 lambda lambda      128 ${currentDate} ethnicity_config\n")
+            files.append("-rw-r--r--  1 lambda lambda      128 ${currentDate} ethnicity_config\r\n")
         }
         
-        files.append('\n')
-        files.append(TerminalFormatter.formatText("USAGE:", 'bold', 'white')).append('\n')
-        files.append("cat <filename>     - View file contents\n")
-        files.append("chmod +x <file>    - Make puzzle room file executable\n")
-        files.append("execute --<flag> <nonce> <file> - Run executable puzzle room files\n")
+        files.append('\r\n')
+        files.append(TerminalFormatter.formatText("USAGE:", 'bold', 'white')).append('\r\n')
+        files.append("cat <filename>     - View file contents\r\n")
+        files.append("chmod +x <file>    - Make puzzle room file executable\r\n")
+        files.append("execute --<flag> <nonce> <file> - Run executable puzzle room files\r\n")
         
         if (puzzleRooms.size() > 0) {
             def hasNonExecutable = puzzleRooms.any { !it.data.isExecutable }
             if (hasNonExecutable) {
-                files.append('\n')
+                files.append('\r\n')
                 files.append(TerminalFormatter.formatText("💡 TIP:", 'bold', 'yellow'))
-                    .append(" Puzzle room files must be made executable with 'chmod +x <filename>' before they can be executed!\n")
+                    .append(" Puzzle room files must be made executable with 'chmod +x <filename>' before they can be executed!\r\n")
             }
         }
         
@@ -3182,4 +3243,166 @@ ${TerminalFormatter.formatText('💡 TIP:', 'bold', 'yellow')} Use 'pinv' to see
     private String showPuzzleKnowledgeMarket(LambdaPlayer player) {
         return puzzleKnowledgeTradingService.formatTradeablePuzzleKnowledge(player)
     }
+    
+    private void saveCommandToHistory(LambdaPlayer player, String command) {
+        try {
+            CommandHistory.withTransaction {
+                def commandHistory = new CommandHistory(
+                    player: player,
+                    command: command,
+                    executedAt: new Date()
+                )
+                commandHistory.save(failOnError: true)
+                
+                // Keep only last 20 commands per player
+                def oldCommands = CommandHistory.findAllByPlayer(player, [sort: 'executedAt', order: 'desc'])
+                if (oldCommands.size() > 20) {
+                    oldCommands[20..-1].each { it.delete() }
+                }
+            }
+        } catch (Exception e) {
+            println "Error saving command history: ${e.message}"
+        }
+    }
+    
+    private List<String> getPlayerCommandHistory(LambdaPlayer player) {
+        try {
+            return CommandHistory.withTransaction {
+                CommandHistory.findAllByPlayer(player, [sort: 'executedAt', order: 'desc', max: 20])
+                    .collect { it.command }
+                    .reverse() // Most recent first for arrow key navigation
+            }
+        } catch (Exception e) {
+            println "Error retrieving command history: ${e.message}"
+            return []
+        }
+    }
+    
+    private String showCommandHistory(LambdaPlayer player) {
+        def history = getPlayerCommandHistory(player)
+        def output = new StringBuilder()
+        
+        output.append(TerminalFormatter.formatText("=== COMMAND HISTORY ===", 'bold', 'cyan')).append('\r\n')
+        
+        if (history.isEmpty()) {
+            output.append("No command history found.\r\n")
+        } else {
+            output.append("Recent commands (most recent first):\r\n\r\n")
+            history.reverse().eachWithIndex { command, index ->
+                def number = String.format("%2d", index + 1)
+                output.append("${TerminalFormatter.formatText(number, 'bold', 'white')}. ${command}\r\n")
+            }
+            output.append("\r\n${TerminalFormatter.formatText('💡 Tip: Copy and paste commands to reuse them', 'italic', 'yellow')}")
+            output.append("\r\n")
+        }
+        
+        return output.toString()
+    }
+    
+    private String readLineWithCharacterLogging(InputStream inputStream, OutputStream outputStream, PrintWriter writer) {
+        StringBuilder line = new StringBuilder()
+        
+        try {
+            // Enable character-at-a-time mode with proper telnet negotiation
+            outputStream.write(-1); outputStream.write(-5); outputStream.write(1)  // IAC WILL ECHO
+            outputStream.write(-1); outputStream.write(-5); outputStream.write(3)  // IAC WILL SUPPRESS-GO-AHEAD
+            outputStream.write(-1); outputStream.write(-3); outputStream.write(3)  // IAC DO SUPPRESS-GO-AHEAD
+            outputStream.flush()
+            
+            println "DEBUG: Character mode enabled - keystroke detection active"
+            Thread.sleep(100) // Brief pause for negotiation
+            
+            while (true) {
+                int ch = inputStream.read()
+                
+                // Handle telnet protocol sequences
+                if (ch == 255) { // IAC
+                    handleIACSequence(inputStream, outputStream)
+                    continue
+                }
+                
+                // Log keystrokes for debugging
+                System.out.println("KEYSTROKE: ${ch} '${getPrintableChar(ch)}'")
+                System.out.flush()
+                
+                // Handle arrow keys immediately - don't echo them
+                if (ch == 27) { // Start of escape sequence
+                    int ch1 = inputStream.read()
+                    int ch2 = inputStream.read()
+                    if (ch1 == 91) { // '['
+                        if (ch2 == 65) { // 'A' = Up arrow
+                            println "UP ARROW DETECTED - TODO: Show previous command"
+                            continue
+                        } else if (ch2 == 66) { // 'B' = Down arrow  
+                            println "DOWN ARROW DETECTED - TODO: Show next command"
+                            continue
+                        }
+                    }
+                    // If not arrow keys, continue processing
+                }
+                
+                if (ch == 13 || ch == 10) { // Enter
+                    // Send proper CRLF for line ending
+                    outputStream.write(13)  // CR
+                    outputStream.write(10)  // LF
+                    outputStream.flush()
+                    break
+                } else if (ch >= 32 && ch <= 126) { // Printable ASCII
+                    line.append((char)ch)
+                    outputStream.write(ch)
+                    outputStream.flush()
+                } else if (ch == 8 || ch == 127) { // Backspace
+                    if (line.length() > 0) {
+                        line.deleteCharAt(line.length() - 1)
+                        outputStream.write(8)   // Move back
+                        outputStream.write(32)  // Space  
+                        outputStream.write(8)   // Move back
+                        outputStream.flush()
+                    }
+                }
+            }
+        } catch (Exception e) {
+            println "Character mode error: ${e.message}"
+        }
+        
+        return line.toString()
+    }
+    
+    private void handleIACSequence(InputStream input, OutputStream output) {
+        try {
+            int command = input.read()
+            int option = input.read()
+            println "DEBUG: Telnet negotiation - command: ${command}, option: ${option}"
+            if (command == -3 && (option != 1 && option != 3)) { // DO, but not ECHO or SUPPRESS_GO_AHEAD
+                output.write(-1); output.write(-4); output.write(option) // WONT
+                output.flush()
+            }
+        } catch (Exception e) {
+            println "IAC error: ${e.message}"
+        }
+    }
+    
+    private String getPrintableChar(int ch) {
+        if (ch >= 32 && ch <= 126) return (char) ch
+        switch(ch) {
+            case 27: return "<ESC>"
+            case 13: return "<CR>" 
+            case 10: return "<LF>"
+            case 8:
+            case 127: return "<BS>"
+            default: return "<${ch}>"
+        }
+    }
+    
+    public void sendFormattedOutput(OutputStream outputStream, String text) {
+        try {
+            // Convert entire text to UTF-8 bytes and send
+            byte[] utf8Bytes = text.getBytes("UTF-8")
+            outputStream.write(utf8Bytes)
+            outputStream.flush()
+        } catch (Exception e) {
+            println "Error sending formatted output: ${e.message}"
+        }
+    }
+
 }

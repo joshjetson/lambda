@@ -62,7 +62,8 @@ class LambdaPlayer {
         puzzleLogicFragments: PuzzleLogicFragment,
         collectedVariables: HiddenVariable,
         discoveredNonces: ElementalNonce,
-        executionHistory: PuzzleExecution
+        executionHistory: PuzzleExecution,
+        commandHistory: CommandHistory
     ]
     
     static constraints = {

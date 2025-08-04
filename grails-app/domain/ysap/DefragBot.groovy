@@ -154,6 +154,7 @@ Use 'cat /proc/defrag/${botId}' to view process file
 Use 'grep' with regex patterns to find the PID
 
 Example commands:
+  t
   grep -o 'defrag_process_id: [0-9]*' /proc/defrag/${botId}
   grep -o '[0-9][0-9][0-9][0-9]' /proc/defrag/${botId}
 

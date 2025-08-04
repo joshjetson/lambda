@@ -33,8 +33,8 @@ class DigitCycler {
                 def status = "Slot ${slotIndex + 1}/${session.repairCode.length()}"
                 def updateText = "🔧 REPAIR SECTOR: ${codeDisplay} | Current: ${currentDisplay} | ${status} | ENTER = Lock"
 
-                session.playerWriter.println(updateText)
-                session.playerWriter.flush()
+                // Use character-mode compatible output with existing PrintWriter
+                sendToWriter(session.playerWriter, updateText)
             } catch (Exception e) {
                 session.isActive = false
             }
@@ -46,6 +46,20 @@ class DigitCycler {
     void stop() {
         if (task && !task.isCancelled()) {
             task.cancel(false)
+        }
+    }
+    
+    private void sendToWriter(PrintWriter writer, String text) {
+        try {
+            // Send with proper line ending for character mode
+            writer.print(text)
+            writer.print('\r\n')  // Use CRLF for character mode
+            writer.flush()
+        } catch (Exception e) {
+            println "Error in DigitCycler output: ${e.message}"
+            // Fallback to standard println
+            writer.println(text)
+            writer.flush()
         }
     }
 }

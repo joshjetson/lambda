@@ -1,6 +1,7 @@
 package ysap
 
 import grails.gorm.transactions.Transactional
+import ysap.helpers.BoxBuilder
 import ysap.helpers.DigitCycler
 
 import java.util.concurrent.ConcurrentHashMap
@@ -143,19 +144,15 @@ class SimpleRepairService {
     }
 
 
-
-
-
-
     private Map completeRepair(RepairSession session) {
         // Stop cycling
         if (session.cyclingTask) {
             session.cyclingTask.cancel(false)
         }
-        
+
         def result = [success: session.isCorrect(), continueGame: false]
         def lockCode = session.repairCode.split('').join(' ')
-        def keyCode= session.lockedDigits.join(' ')
+        def keyCode = session.lockedDigits.join(' ')
         def x = session.targetX
         def y = session.targetY
 
@@ -164,42 +161,47 @@ class SimpleRepairService {
             CoordinateState.withTransaction {
                 coordinateStateService.repairCoordinate(session.matrixLevel, session.targetX, session.targetY, 100)
             }
-            
-            result.message = """
-╔════════════════════════════════════════╗
-║           REPAIR SUCCESSFUL!           ║
-╠════════════════════════════════════════╣
-║  Target Code: ${lockCode}              ║
-║  Your Result: ${keyCode}               ║
-║                                        ║
-║  ✅ (${x},${y}) is now accessible!     ║
-║     Repair protocols completed.        ║
-╚════════════════════════════════════════╝
-""".trim()
+
+            // Using BoxBuilder
+            def box = new BoxBuilder(40)
+                    .addCenteredLine("REPAIR SUCCESSFUL!")
+                    .addSeparator()
+                    .addLine("  Target Code: ${lockCode}")
+                    .addLine("  Your Result: ${keyCode}")
+                    .addEmptyLine()
+                    .addLine("  ✅ (${x},${y}) is now accessible!")
+                    .addLine("     Repair protocols completed.")
+                    .build()
+
+            result.message = box
             result.gameWon = true
 
         } else {
             // Failed repair
-            result.message = """
-╔════════════════════════════════════════╗
-║            REPAIR FAILED!              ║
-╠════════════════════════════════════════╣
-║  Target Code: ${lockCode}              ║
-║  Your Result: ${keyCode}               ║
-║                                        ║
-║  ❌ Sequence mismatch detected!        ║
-║ Type 'repair ${x} ${y}' to try again.  ║
-╚════════════════════════════════════════╝
-""".trim()
+            def box = new BoxBuilder(40)
+                    .addCenteredLine("REPAIR FAILED!")
+                    .addSeparator()
+                    .addLine("  Target Code: ${lockCode}")
+                    .addLine("  Your Result: ${keyCode}")
+                    .addEmptyLine()
+                    .addLine("  ❌ Sequence mismatch detected!")
+                    .addLine(" Type 'repair ${x} ${y}' to try again.")
+                    .build()
+
+            result.message = box
             result.gameWon = false
         }
-        
+
         // Clean up
         stopRepairSession(session.playerUsername)
-        
+
         return result
     }
-    
+
+
+
+
+
     def isPlayerInRepairSession(String playerUsername) {
         def session = activeSessions[playerUsername]
         def result = session && session.isActive
@@ -257,30 +259,29 @@ class SimpleRepairService {
         }
         return code
     }
-    
+
     private String buildInitialDisplay(RepairSession session, Map coordinateValue) {
         def codeDisplay = session.repairCode.split('').join(' ')
-        
-        return """
-╔════════════════════════════════════════╗
-║      🔧 COORDINATE REPAIR MINI-GAME 🔧  ║
-╠════════════════════════════════════════╣
-║  Target: (${session.targetX},${session.targetY}) Matrix Level ${session.matrixLevel}       ║
-║  ${coordinateValue.description.padRight(38)} ║
-║                                        ║
-║  REPAIR CODE: ${codeDisplay.padRight(29)} ║
-║                                        ║
-║  🎰 SLOT MACHINE STARTING...           ║
-║     Press ENTER KEY to stop digits!    ║
-║                                        ║
-║  Type 'exit' to quit mini-game         ║
-╚════════════════════════════════════════╝
 
-🎮 SLOT MACHINE ACTIVE - Watch the numbers cycle!
-Target: ${codeDisplay}  |  Current: ${session.getCurrentDisplay()}  |  ENTER = Lock Digit
-""".trim()
+        def box = new BoxBuilder(40)
+                .addCenteredLine("🔧 COORDINATE REPAIR MINI-GAME 🔧")
+                .addSeparator()
+                .addLine("  Target: (${session.targetX},${session.targetY}) Matrix Level ${session.matrixLevel}")
+                .addLine("  ${coordinateValue.description}")
+                .addEmptyLine()
+                .addLine("  REPAIR CODE: ${codeDisplay}")
+                .addEmptyLine()
+                .addLine("  🎰 SLOT MACHINE STARTING...")
+                .addLine("     Press ENTER KEY to stop digits!")
+                .addEmptyLine()
+                .addLine("  Type 'exit' to quit mini-game")
+                .build()
+
+        return box + "\r\n\r\n" +
+                "🎮 SLOT MACHINE ACTIVE - Watch the numbers cycle!\r\n" +
+                "Target: ${codeDisplay}  |  Current: ${session.getCurrentDisplay()}  |  ENTER = Lock Digit\r\n"
     }
-    
+
     // Admin methods
     def forceStopAllSessions() {
         activeSessions.values().each { session ->
@@ -295,4 +296,5 @@ Target: ${codeDisplay}  |  Current: ${session.getCurrentDisplay()}  |  ENTER = L
     def getActiveSessionCount() {
         return activeSessions.size()
     }
+
 }

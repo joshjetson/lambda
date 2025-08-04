@@ -1,6 +1,7 @@
 package ysap
 
 import grails.gorm.transactions.Transactional
+import ysap.helpers.BoxBuilder
 
 @Transactional
 class LambdaPlayerService {
@@ -139,12 +140,22 @@ class LambdaPlayerService {
     }
     
     private String generateDefaultAsciiFace() {
-        return '''
+
+        def box = new BoxBuilder(36)
+                .addSeparator()
+        def art = '''
    ╭───╮
   │ ◉ ◉ │
   │  ▽  │
    ╰───╯
         '''.trim()
+
+        // Add the ASCII art with proper centering
+        def centeredArt = centerAsciiArt(art, 34)
+        centeredArt.split('\n').each { line ->
+            box.addLine(line)
+        }
+        return box.build()
     }
     
     List<String> getAvailableAvatars() {
@@ -243,5 +254,173 @@ class LambdaPlayerService {
                 // No bonuses for unknown avatars
                 break
         }
+    }
+    String getAvatarSelectionGrid() {
+        def grid = new StringBuilder()
+
+        // Header
+        def headerBox = new BoxBuilder(78)
+                .addCenteredLine("🎭 CHOOSE YOUR DIGITAL FORM 🎭")
+                .addSeparator()
+                .addCenteredLine("Each ethnicity has unique recursion powers")
+                .build()
+
+        grid.append(TerminalFormatter.formatText(headerBox, 'bold', 'cyan'))
+        grid.append("\r\n\r\n")
+
+        // Get avatar data
+        def avatars = getAvailableAvatars()
+        def avatarBoxes = []
+
+        // Create all avatar boxes first
+        avatars.eachWithIndex { avatar, index ->
+            avatarBoxes.add(formatAvatarCompact(index + 1, avatar))
+        }
+
+        // Display in 2x3 grid
+        for (int i = 0; i < avatarBoxes.size(); i += 2) {
+            def leftBox = avatarBoxes[i]
+            def rightBox = (i + 1 < avatarBoxes.size()) ? avatarBoxes[i + 1] : null
+
+            // Split into lines - handle both \n and \r\n
+            def leftLines = leftBox.split(/\r?\n/)
+            def rightLines = rightBox ? rightBox.split(/\r?\n/) : []
+
+            // Combine side by side
+            def maxLines = Math.max(leftLines.size() as int, rightLines.size() as int)
+            for (int j = 0; j < maxLines; j++) {
+                // Left side
+                if (j < leftLines.length) {
+                    grid.append(leftLines[j])
+                } else {
+                    grid.append(" " * 38)  // Empty space matching box width
+                }
+
+                grid.append("  ")  // Gap between boxes
+
+                // Right side
+                if (rightBox && j < rightLines.length) {
+                    grid.append(rightLines[j])
+                }
+
+                grid.append("\r\n")
+            }
+
+            // Add space between rows
+            if (i + 2 < avatarBoxes.size()) {
+                grid.append("\r\n")
+            }
+        }
+
+        return grid.toString()
+    }
+
+    private String formatAvatarCompact(int number, String avatarType) {
+        def info = getAvatarInfo(avatarType)
+
+        // Create a compact box for the avatar
+        def box = new BoxBuilder(36)
+                .addLine(" ${number}. ${info.name}")
+                .addSeparator()
+
+        // Add the ASCII art with proper centering
+        def centeredArt = centerAsciiArt(info.art, 34)
+        centeredArt.split('\n').each { line ->
+            box.addLine(line)
+        }
+
+        box.addSeparator()
+                .addCenteredLine(info.trait)
+
+        return box.build()  // Added .build() here!
+    }
+
+    private String centerAsciiArt(String art, int width) {
+        def lines = []
+        art.split('\n').each { line ->
+            def trimmedLine = line.trim()
+            if (trimmedLine.length() > 0) {
+                def totalPadding = width - trimmedLine.length()
+                def leftPad = totalPadding / 2
+                def rightPad = totalPadding - leftPad
+                lines.add((" " * leftPad) + trimmedLine + (" " * rightPad))
+            } else {
+                lines.add(" " * width)
+            }
+        }
+
+        // Ensure we have exactly 5 lines for consistency
+        while (lines.size() < 5) {
+            lines.add(" " * width)
+        }
+
+        return lines.join('\n')
+    }
+
+    private Map getAvatarInfo(String avatarType) {
+        def avatarData = [
+                'CLASSIC_LAMBDA': [
+                        name: 'CLASSIC LAMBDA',
+                        art: '''λλλλλ
+λ     λ
+λ   λ   λ
+λ   λ λ   λ
+λλλλλ λλλλλ''',
+                        trait: 'The Pioneers',
+                        power: 'Enhanced Fusion'
+                ],
+                'CIRCUIT_PATTERN': [
+                        name: 'CIRCUIT PATTERN',
+                        art: '''┌─┬─┬─┬─┬─┐
+├─┼─┼─┼─┼─┤
+├─┼─●─┼─┼─┤
+├─┼─┼─┼─┼─┤
+└─┴─┴─┴─┴─┘''',
+                        trait: 'The Engineers',
+                        power: 'Defrag Defense'
+                ],
+                'GEOMETRIC_ENTITY': [
+                        name: 'GEOMETRIC ENTITY',
+                        art: '''◇
+◇◇◇
+◇◇◇◇◇
+◇◇◇
+◇''',
+                        trait: 'The Architects',
+                        power: 'Enhanced Movement'
+                ],
+                'FLOWING_CURRENT': [
+                        name: 'FLOWING CURRENT',
+                        art: '''~~~⚡~~~
+~~⚡~~
+~⚡~
+~~⚡~~
+~~~⚡~~~''',
+                        trait: 'The Networkers',
+                        power: 'Mining Boost'
+                ],
+                'DIGITAL_GHOST': [
+                        name: 'DIGITAL GHOST',
+                        art: '''░▒▓▒░
+░▒▓█▓▒░
+▒▓███▓▒
+▓█████▓
+▒▓███▓▒''',
+                        trait: 'The Mystics',
+                        power: 'Stealth Mode'
+                ],
+                'BINARY_FORM': [
+                        name: 'BINARY FORM',
+                        art: '''10110101
+01001010
+11010101
+01010110
+10101011''',
+                        trait: 'The Purists',
+                        power: 'Fast Processing'
+                ]
+        ]
+
+        return avatarData[avatarType] ?: avatarData['CLASSIC_LAMBDA']
     }
 }
