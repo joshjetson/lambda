@@ -73,9 +73,10 @@ class ChatService {
     
     def formatChatDisplay(List<ChatMessage> messages) {
         def display = new StringBuilder()
-        display.append(TerminalFormatter.formatText("=== LAMBDA MINGLE CHAMBER ===", 'bold', 'cyan')).append('\n')
+        display.append(TerminalFormatter.formatText("=== HEAP SPACE ===", 'bold', 'cyan')).append('\n')
         display.append(TerminalFormatter.formatText("Digital entities exchange bits, barter items, and share knowledge", 'italic', 'yellow')).append('\n')
-        display.append(TerminalFormatter.formatText("Type 'echo <message>' to communicate | 'exit' to leave mingle", 'italic', 'green')).append('\n')
+        display.append(TerminalFormatter.formatText("@*STAY TOO LONG AND GET CACHED*@", 'italic', 'yellow')).append('\n')
+        display.append(TerminalFormatter.formatText("Type 'echo <message>' to communicate | 'exit' to leave heap", 'italic', 'green')).append('\n')
         display.append("─" * 80).append('\n')
         
         messages.each { msg ->

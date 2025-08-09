@@ -166,7 +166,7 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 - ✅ Matrix-level based board positions (10 levels, 12 sectors each)
 - ✅ Telnet-based player authentication and creation
 - ✅ **Bits currency system** - players earn and spend digital currency
-- ✅ **Mingle chat room** - real-time communication via echo commands
+- ✅ **Heap space chat room** - real-time communication via echo commands
 - ✅ **Defrag bot encounters** - hostile NPCs with command-line challenges
 - ✅ **Special items system** - respawn cache, swap space, various power-ups
 - ✅ Advanced movement with encounter mechanics
@@ -174,12 +174,12 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 - ✅ Enhanced inventory system showing bits, items, fragments
 - ✅ Real-time position tracking (ready for GPIO integration)
 - ✅ **Fragment Quantity System** - duplicate pickups stack with x2, x3 display
-- ✅ **Complete Trading Economy** - player-to-player commerce in mingle chamber
+- ✅ **Complete Trading Economy** - player-to-player commerce in heap space
 - ✅ **Lambda Merchant NPCs** - random merchants on each matrix level
 - ✅ **Fragment File System** - cat/pickup mechanics for logic fragment collection
 
 **Major Game Systems Added (v0.3)**:
-- 🔄 **Mingle Chamber**: Full social hub with chat, trading, and commerce
+- 🔄 **Heap Space**: Full social hub with chat, trading, and commerce
 - ⚔️ **Defrag Bot Combat**: Command-line based encounters requiring Linux knowledge
 - 💰 **Economy System**: Bits currency with earning/spending mechanics
 - 🎒 **Special Items**: Collectible items with various effects and trading potential
@@ -217,7 +217,7 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 4. **Collect**: Use `scan` to find logic fragments, then `pickup` to collect them
 5. **Combat**: Encounter defrag bots and use command-line skills to defeat them
 6. **Earn**: Collect bits, special items, and logic fragments as rewards
-7. **Trade**: Use `mingle` chamber for full marketplace experience:
+7. **Trade**: Use `heap` space for full marketplace experience (command: `mingle`):
    - `echo <msg>` - Chat with other entities
    - `pay <entity> <bits>` - Transfer currency
    - `pm <entity> <msg>` - Private messages
@@ -262,7 +262,7 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 4. **Manage**: `cat fragment_file` to see collection
 
 ### **Social Features**:
-1. **Mingle**: Enter with `mingle` command
+1. **Heap**: Enter with `mingle` command
 2. **Chat**: `echo [message]` to broadcast
 3. **Trade**: `trade [entity]` to open trading
 4. **Payment**: `pay [entity] [bits]` to transfer money
@@ -273,20 +273,21 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 2. **Mining**: Check rewards with `mining`
 3. **Fusion**: Enhance fragments with `fusion [fragment_name]`
 4. **Items**: Use special items with `use [item_name]`
+5. **Heap**: Enter with `mingle` command for social features
 
 **REMEMBER**: Read game output carefully, respond to actual bot IDs and PIDs dynamically, never hardcode values in testing.
 
 **Latest Fixes (Critical - Deep Research Applied)**:
 - ✅ **Timestamp Formatting Issue**: Fixed `java.sql.Timestamp.format()` error with proper type checking
-- ✅ **IRC-Style Chat System**: Real-time message broadcasting to all mingle users
+- ✅ **IRC-Style Chat System**: Real-time message broadcasting to all heap users
 - ✅ **Hibernate Session Management**: All telnet thread database operations properly wrapped in transactions
-- ✅ **Mingle Chat System**: Fully functional with immediate message display and history
+- ✅ **Heap Chat System**: Fully functional with immediate message display and history
 - ✅ **Movement System**: Coordinates properly constrained to 0-9 matrix bounds
 - ✅ **Defrag Bot Spawning**: Fixed string method error and safe zone restrictions
 - ✅ **Logic Fragment System**: Complete pickup/storage system with coordinate-based spawning
 - ✅ **Fragment File Date Fix**: Fixed Date.format() error in fragment_file display
 - ✅ **Fragment Quantity System**: Implemented duplicate fragment stacking with quantity display
-- ✅ **Mingle Trading System**: Full player-to-player commerce with pay/pm commands
+- ✅ **Heap Trading System**: Full player-to-player commerce with pay/pm commands
 - ✅ **Lambda Merchant System**: Random NPC merchants with shop interfaces on all levels
 - ✅ **Null Safety for Collections**: Fixed fragment file display with proper null filtering
 - ✅ **Daily Entropy System**: Digital coherence decay creating daily login addiction
@@ -335,13 +336,13 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 - **Quantity system**: Duplicate pickups increment quantity (x2, x3, etc.)
 
 ### **Complete Trading Economy**
-- **Mingle Chamber Commands**:
+- **Heap Space Commands**:
   - `pay <entity> <bits>` - Transfer currency between players
   - `pm <entity> <message>` - Send private messages
   - `trade <entity>` - Open trading interface (shows inventory)
-  - `list` or `who` - View all entities in mingle chamber
+  - `list` or `who` - View all entities in heap space
 - **Transaction safety**: All transfers use database transactions
-- **Real-time notifications**: Payments broadcast to chamber
+- **Real-time notifications**: Payments broadcast to heap
 
 ### **Lambda Merchant System** 
 - **Random spawning**: One merchant per matrix level at random coordinates
@@ -365,7 +366,7 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 - **LogicFragment**: Added `quantity` field for stacking duplicates
 - **LambdaMerchant**: New domain for NPC merchants with JSON inventory
 - **LambdaMerchantService**: Complete shop mechanics and transaction handling
-- **Trading integration**: Mingle chamber supports full marketplace features
+- **Trading integration**: Heap space supports full marketplace features
 
 ### **Command Reference (v0.4 - Addiction Systems)**
 **Fragment Commands**: `scan`, `pickup`, `cat fragment_file`, `cat <fragment>`
@@ -373,7 +374,7 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 **Merchant Commands**: `shop`, `buy <number>`, `sell <fragment>`
 **Addiction Systems**: `entropy [status|refresh]`, `mining`, `fusion <fragment>`
 **Movement**: `move north/south/east/west` (0-9 matrix bounds)
-**Social**: `mingle` (enter), `echo <msg>` (chat), `exit` (leave)
+**Social**: `mingle` (enter heap), `echo <msg>` (chat), `exit` (leave)
 **Combat**: `defrag -h`, `cat /proc/defrag/<id>`, `grep`, `kill -9 <pid>`
 
 ## Highly Addictive Game Mechanics (v0.4)
@@ -504,7 +505,7 @@ After fixing special items bug, perform comprehensive game testing:
 - ✅ **Movement**: Test all directions (north/south/east/west)
 - ✅ **Scanning**: Use `scan` to detect fragments, merchants, threats
 - ✅ **Combat**: Encounter defrag bots, test Linux commands
-- ✅ **Mingle Chamber**: Enter `mingle`, test `echo`, `pay`, `trade`, `pm` commands
+- ✅ **Heap Space**: Enter `mingle`, test `echo`, `pay`, `trade`, `pm` commands
 - ✅ **Fragment Collection**: Use `pickup` and `cat fragment_file`
 - ✅ **Inventory**: Check `inventory` command functionality
 - ✅ **Special Items**: Test item usage with `use <item_name>`

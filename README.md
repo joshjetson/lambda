@@ -164,7 +164,7 @@ OUTPUT: coordinates:7,3
 **Step 5: Find Elemental Nonces (Digital Keys)**
 - **Defrag bot rewards**: Higher-level bots drop elemental nonces
 - **Fragment execution**: Some fragments generate nonces
-- **Trading**: Buy nonces from other players in mingle chamber
+- **Trading**: Buy nonces from other players in heap space
 
 **Example nonce:**
 ```
@@ -271,7 +271,7 @@ pinv                 # View puzzle inventory
 pprog                # Check puzzle progress
 
 # Social & Trading
-mingle          # Enter chat chamber
+heap          # Enter heap space for social features
 echo <message>  # Chat with other entities
 trade <player>  # Start trading interface
 pmarket         # View puzzle knowledge market
@@ -461,7 +461,7 @@ Choose your Lambda heritage! Each ethnicity provides unique abilities and cultur
 ```
 **Origin**: Born from network protocols and data transmission systems
 **Abilities**:
-- Enhanced mingle chamber communication
+- Enhanced heap space communication
 - +25% bit mining efficiency
 - Superior trading and social interaction bonuses
 
@@ -530,7 +530,7 @@ Logic fragments are the core resource, each granting specific Python capabilitie
 ### 💰 Economy & Trading
 - **Bits Currency**: Earned through combat victories, mining, and trading
 - **Special Items**: 10 functional types with real gameplay effects
-- **Player Trading**: Complete marketplace in mingle chamber
+- **Player Trading**: Complete marketplace in heap space
 - **Lambda Merchants**: NPCs selling fragments and items
 
 ### ⚔️ Combat System
@@ -577,7 +577,7 @@ kill -9 <pid>               # Terminate the bot
 4. **⚡ Execute Fragments**: Use `execute <fragment>` to process variables and calculate puzzle coordinates
 5. **🧩 Solve Elemental Puzzles**: Navigate to calculated coordinates and unlock symbols with `execute --<flag> <nonce> <file>`
 6. **⚔️ Combat**: Encounter defrag bots and defeat them with Linux commands for rewards
-7. **💬 Socialize**: Enter `mingle` chamber for trading, chat, and puzzle knowledge exchange
+7. **💬 Socialize**: Enter heap space (command: `heap`) for trading, chat, and puzzle knowledge exchange
 8. **🛒 Trade**: Buy/sell fragments, variables, and nonces with merchants and players
 9. **🔧 Repair**: Use skill-based mini-games to restore coordinates destroyed by auto-defrag bots
 10. **🏆 Progress**: Collect all 4 elemental symbols to face the Logic Daemon and advance matrix levels
@@ -631,7 +631,7 @@ While traversing the matrix in search of elementals and daemon clues, players en
 **Defragged Sectors**: Coordinates requiring repair mini-games before entry
 **Defrag Bots**: Hostile entities requiring Linux combat skills to defeat
 **Lambda Merchants**: NPCs selling special items, logic fragments, and potentially powerful daemon clues
-**Social Hub**: The mingle chamber where players can trade intelligence, bargain for clues, or discuss strategies
+**Social Hub**: The heap space where players can trade intelligence, bargain for clues, or discuss strategies
 
 #### **🏆 Victory Conditions**
 - **Per-Level Goal**: Collect all 4 elemental symbols to unlock the Logic Daemon encounter
@@ -677,7 +677,7 @@ execute "Electrical Analysis Fragment"
 **How to get them**:
 - **Defrag bot rewards**: Higher-level bots drop elemental nonces
 - **Fragment execution**: Some fragments generate nonces  
-- **Trading**: Buy from other players in mingle chamber
+- **Trading**: Buy from other players in heap space
 **Example nonce**:
 ```
 🔑 Elemental nonce: AIR_KEY_3
@@ -734,7 +734,7 @@ Your AIR puzzle coordinates have been randomized!
 - **Purchase System**: `buy <number>` to purchase items with bits
 
 #### **👥 Player Trading**
-- **Mingle Chamber**: Social hub for all trading activities
+- **Heap Space**: Social hub for all trading activities
 - **Direct Payments**: `pay <player> <bits>` for currency transfers
 - **Item Trading**: `trade <player>` for comprehensive item exchange interface
 - **Private Messages**: `pm <player> <message>` for negotiation
@@ -885,7 +885,7 @@ The system evaluates each coordinate to determine repair complexity:
 #### **🎯 Competitive Edge**
 - **Speed vs. Strategy**: Racing for symbols vs. optimizing resources
 - **Knowledge Trading**: Monetize your puzzle solutions
-- **Alliance Building**: Coordinate in mingle chamber for mutual benefit
+- **Alliance Building**: Coordinate in heap space for mutual benefit
 - **Information Warfare**: Use coordinate shifts to your advantage
 
 #### **🔧 Essential Commands for Elemental Symbol Collection**
@@ -928,7 +928,7 @@ repair help                  # Complete repair system guide
 # During mini-game: Press SPACE BAR to lock in each cycling digit
 
 # SOCIAL & TRADING
-mingle                        # Enter trading/chat chamber
+heap                        # Enter heap space for social features
 echo <message>                # Chat with other players
 pay <player> <bits>           # Transfer currency
 pm <player> <message>         # Private messages
@@ -1021,7 +1021,7 @@ Navigate themed matrix levels with unique challenges and atmospheres
 - **Enhanced Merchant System**: Matrix-level progression with puzzle fragments and special items
 - **Defrag Bot Combat**: Linux command-line challenges with real skill requirements
 - **Special Items System**: 10 functional types with real gameplay effects
-- **Complete Trading Economy**: Mingle chamber with comprehensive marketplace
+- **Complete Trading Economy**: Heap space with comprehensive marketplace
 - **Synthesized Audio Engine**: Procedural sound generation for immersive feedback
 - **Daily Addiction Systems**: Entropy decay, passive mining, fragment fusion with gambling mechanics
 - **Auto-Defrag Infrastructure**: Background coordinate destruction system creating repair challenges

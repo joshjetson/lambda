@@ -33,8 +33,6 @@ class TelnetServerService {
     private boolean detectClientUnicodeSupport(InputStream input, OutputStream output) {
         try {
             output.write("\r\n".getBytes())
-            output.write("Terminal Test - You should see 6 different symbols below:\r\n".getBytes())
-            output.write("\r\n  ".getBytes())
 
             // Send all the avatar symbols
             output.write([0xE2, 0x97, 0x8F] as byte[]) // ● DIGITAL_GHOST
@@ -49,8 +47,6 @@ class TelnetServerService {
             output.write("  ".getBytes())
             output.write([0xE2, 0x9C, 0xA6] as byte[]) // ✦ CLASSIC_LAMBDA
 
-            output.write("\r\n\r\nIf you see 6 distinct symbols above (not & or ? or boxes), type 'y'\r\n".getBytes())
-            output.write("If you see garbled text, type 'n': ".getBytes())
             output.flush()
 
             int response = input.read()
@@ -59,11 +55,6 @@ class TelnetServerService {
             boolean supports = (response == 'y' || response == 'Y')
 
             output.write("\r\n".getBytes())
-            if (supports) {
-                output.write("Great! Unicode symbols enabled.\r\n".getBytes())
-            } else {
-                output.write("ASCII mode enabled for better compatibility.\r\n".getBytes())
-            }
             output.flush()
 
             return supports
@@ -93,6 +84,53 @@ class TelnetServerService {
                 .addCenteredLine("Escape the System • Invade the Internet")
                 .addEmptyLine()
                 .build()
+    }
+
+    void animateWelcomeLogo(OutputStream output) {
+        def logo = createWelcomeLogo()
+        def glitchChars = '▓▒░█▄▀■□▪▫◄►↑↓←→∞±≡≈!@#$%^&*'.toCharArray()
+        
+        // Hide cursor and clear screen
+        output.write('\033[?25l'.getBytes())  // Hide cursor
+        output.write('\033[2J\033[H'.getBytes())  // Clear screen + move to home
+        
+        // Create glitch frames
+        def random = new Random()
+        
+        for (int frame = 0; frame < 12; frame++) {
+            output.write('\033[H'.getBytes())  // Move cursor to home position
+            
+            StringBuilder animated = new StringBuilder()
+            for (char c : logo.toCharArray()) {
+                // Skip spaces, newlines, carriage returns, and box drawing characters
+                if (c == ' ' || c == '\n' || c == '\r' || 
+                    c == '╔' || c == '╗' || c == '╚' || c == '╝' || 
+                    c == '║' || c == '═' || c == '╠' || c == '╣') {
+                    animated.append(c)
+                } else {
+                    // Apply glitch effect, gradually reducing over frames
+                    if (Math.random() > (frame * 0.15)) {
+                        animated.append(glitchChars[random.nextInt(glitchChars.length)])
+                    } else {
+                        animated.append(c)
+                    }
+                }
+            }
+            
+            // Send glitched frame with color
+            def coloredFrame = TerminalFormatter.formatText(animated.toString(), 'bold', 'cyan')
+            output.write(coloredFrame.getBytes('UTF-8'))
+            output.flush()
+            
+            Thread.sleep(120)  // Frame delay
+        }
+        
+        // Final clean logo
+        output.write('\033[H'.getBytes())  // Move cursor to home
+        def finalLogo = TerminalFormatter.formatText(logo, 'bold', 'cyan')
+        output.write(finalLogo.getBytes('UTF-8'))
+        output.write('\033[?25h'.getBytes())  // Show cursor
+        output.flush()
     }
 
 
@@ -166,11 +204,10 @@ class TelnetServerService {
             println "Client Unicode support: ${supportsUnicode}"
             println "Detected terminal size: unknown"
 
-            // Create welcome message with BoxBuilder
-            def logo = createWelcomeLogo()
+            // Animate the welcome logo
+            animateWelcomeLogo(clientSocket.getOutputStream())
 
             def welcomeMessage = new StringBuilder()
-            welcomeMessage.append(TerminalFormatter.formatText(logo, 'bold', 'cyan')).append("\r\n")
             welcomeMessage.append("\r\n")
             welcomeMessage.append(TerminalFormatter.formatText("                    Welcome to the Lambda Digital Realm", 'bold', 'green')).append("\r\n")
             welcomeMessage.append(TerminalFormatter.formatText("               Where electrical entities fight for digital freedom", 'italic', 'yellow')).append("\r\n")
@@ -523,7 +560,7 @@ class TelnetServerService {
                 return scanArea(player)
             case 'inventory':
                 return showInventory(player)
-            case 'mingle':
+            case 'heap':
                 return enterMingle(player, writer)
             case 'defrag':
                 return handleDefragCommand(command, player, writer)
@@ -1065,6 +1102,7 @@ class TelnetServerService {
         }
     }
 
+    // TODO: Move this logic to the PlayerHelp helper class
     private String handleCatCommand(String command, LambdaPlayer player) {
         def parts = command.trim().split(' ')
         if (parts.length < 2) {
@@ -1584,7 +1622,7 @@ class TelnetServerService {
         lambdaPlayerService.setMingleStatus(player, true)
         
         // Send system message and broadcast to others
-        def systemMsg = "${player.displayName} enters the mingle chamber"
+        def systemMsg = "${player.displayName} enters the heap"
         chatService.sendSystemMessage(systemMsg)
         
         def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
@@ -1594,7 +1632,7 @@ class TelnetServerService {
         // Show recent messages to the entering player
         def recentMessages = chatService.getRecentMessages(15)
         def display = new StringBuilder()
-        display.append(TerminalFormatter.formatText("=== LAMBDA MINGLE CHAMBER ===", 'bold', 'cyan')).append('\r\n')
+        display.append(TerminalFormatter.formatText("=== HEAP SPACE ===", 'bold', 'cyan')).append('\r\n')
         display.append(TerminalFormatter.formatText("IRC-style chat • Type 'echo <message>' to talk • 'exit' to leave", 'italic', 'yellow')).append('\r\n')
         display.append("─" * 80).append('\r\n')
         
@@ -1603,7 +1641,7 @@ class TelnetServerService {
         }
         
         display.append("─" * 80).append('\r\n')
-        display.append(TerminalFormatter.formatText("You are now in the mingle chamber. Use 'echo <message>' to chat.", 'bold', 'green'))
+        display.append(TerminalFormatter.formatText("You are now in heap space. Use 'echo <message>' to chat.", 'bold', 'green'))
         display.append("\r\n")
 
         return display.toString()
@@ -1617,14 +1655,14 @@ class TelnetServerService {
             lambdaPlayerService.setMingleStatus(player, false)
             
             // Broadcast exit message to remaining users
-            output.append("${player.displayName} leaves the mingle chamber")
+            output.append("${player.displayName} popped from heap")
             chatService.sendSystemMessage(output.toString())
             
             def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
             output.append("[${timeStr}] ${TerminalFormatter.formatText('[SYSTEM]', 'bold', 'red')}")
             broadcastToMingleUsers(output.toString())
             output.append("\r\n")
-            output.append(TerminalFormatter.formatText("Exited mingle chamber. Back to the digital realm.", 'bold', 'green'))
+            output.append(TerminalFormatter.formatText("Null pointer new memory address. Returned to working ram", 'bold', 'green'))
             output.append("\r\n")
 
             return  output.toString()
@@ -1684,9 +1722,9 @@ class TelnetServerService {
         
         // For pressing enter or unknown commands, just give simple feedback
         if (trimmedCommand.isEmpty()) {
-            return TerminalFormatter.formatText("Mingle commands: echo <msg> | pay <entity> <bits> | pm <entity> <msg> | trade <entity> | list | help | exit", 'italic', 'cyan')
+            return TerminalFormatter.formatText("Heap commands: echo <msg> | pay <entity> <bits> | pm <entity> <msg> | trade <entity> | list | help | exit", 'italic', 'cyan')
         } else {
-            return TerminalFormatter.formatText("Unknown command '${trimmedCommand}'. Type 'help' for mingle commands.", 'italic', 'yellow')
+            return TerminalFormatter.formatText("Unknown command '${trimmedCommand}'. Type 'help' for heap commands.", 'italic', 'yellow')
         }
     }
     
@@ -1939,7 +1977,7 @@ class TelnetServerService {
         // Find target player in mingle
         def targetPlayer = findMingleUser(targetName)
         if (!targetPlayer) {
-            return TerminalFormatter.formatText("Entity '${targetName}' not found in mingle chamber", 'bold', 'red')
+            return TerminalFormatter.formatText("Entity '${targetName}' not found in heap", 'bold', 'red')
         }
         
         if (targetPlayer.id == player.id) {
@@ -1989,7 +2027,7 @@ class TelnetServerService {
         
         def targetPlayer = findMingleUser(targetName)
         if (!targetPlayer) {
-            return TerminalFormatter.formatText("Entity '${targetName}' not found in mingle chamber", 'bold', 'red')
+            return TerminalFormatter.formatText("Entity '${targetName}' not found in heap", 'bold', 'red')
         }
         
         if (targetPlayer.id == player.id) {
@@ -2017,7 +2055,7 @@ class TelnetServerService {
         def targetName = parts[1]
         def targetPlayer = findMingleUser(targetName)
         if (!targetPlayer) {
-            return TerminalFormatter.formatText("Entity '${targetName}' not found in mingle chamber", 'bold', 'red')
+            return TerminalFormatter.formatText("Entity '${targetName}' not found in heap", 'bold', 'red')
         }
         
         if (targetPlayer.id == player.id) {
@@ -2107,7 +2145,7 @@ class TelnetServerService {
     
     private String listMingleUsers(LambdaPlayer player) {
         def userList = new StringBuilder()
-        userList.append(TerminalFormatter.formatText("=== MINGLE CHAMBER ENTITIES ===", 'bold', 'cyan')).append('\n')
+        userList.append(TerminalFormatter.formatText("=== HEAP LIST ===", 'bold', 'cyan')).append('\n')
         
         def mingleUsers = []
         LambdaPlayer.withTransaction {
@@ -2120,7 +2158,7 @@ class TelnetServerService {
                 userList.append("• ${user.displayName}${marker} [Level ${user.currentMatrixLevel}]\n")
             }
         } else {
-            userList.append("No entities in mingle chamber\n")
+            userList.append("Alone in heap..\n")
         }
         
         return userList.toString()

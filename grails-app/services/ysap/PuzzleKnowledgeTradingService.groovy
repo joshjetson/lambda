@@ -450,7 +450,7 @@ class PuzzleKnowledgeTradingService {
             output.append("Complete puzzles to unlock tradeable knowledge!\n")
         }
         
-        output.append("\n💡 Use 'trade <player>' in mingle chamber to negotiate trades!")
+        output.append("\n💡 Use 'trade <player>' in heap space to negotiate trades!")
         
         return output.toString()
     }
