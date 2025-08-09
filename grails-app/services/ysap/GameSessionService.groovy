@@ -4,6 +4,12 @@ import grails.gorm.transactions.Transactional
 
 @Transactional
 class GameSessionService {
+    def AudioService
+    def LambdaPlayerService
+    def DefragBotService
+    def LambdaMerchantService
+    def PuzzleService
+    def CoordinateStateService
     
     // Current game session ID - changes when server restarts or session resets
     private static String currentGameSession = null
@@ -205,4 +211,138 @@ class GameSessionService {
         println "🔄 ADMIN SESSION RESET: ${oldSession} → ${currentGameSession}"
         return getCurrentGameSession()
     }
+
+    LogicFragment findFragmentAtCoordinates(LambdaPlayer player) {
+        // Use game session service for truly random fragment distribution
+        return this.getFragmentAtCoordinates(player.currentMatrixLevel, player.positionX, player.positionY)
+    }
+
+    private List<String> scanExtendedFragmentRange(LambdaPlayer player) {
+        def extendedFragments = []
+        def scanRange = (int) Math.round(2 * (1 + player.fragmentDetectionBonus)) // Base range 2, +20% = 2.4 = 2 coordinates
+
+        for (int dx = -scanRange; dx <= scanRange; dx++) {
+            for (int dy = -scanRange; dy <= scanRange; dy++) {
+                if (dx == 0 && dy == 0) continue // Skip current position
+
+                def scanX = Math.max(0, Math.min(9, player.positionX + dx))
+                def scanY = Math.max(0, Math.min(9, player.positionY + dy))
+
+                // Use game session service for extended scanning
+                def fragment = this.getFragmentAtCoordinates(player.currentMatrixLevel, scanX, scanY)
+
+                if (fragment) {
+                    def distance = Math.round(Math.sqrt(dx * dx + dy * dy) * 10) / 10
+                    extendedFragments.add("Fragment detected at (${scanX},${scanY}): ${fragment.name} (Distance: ${distance})")
+                }
+            }
+        }
+
+        return extendedFragments
+    }
+
+
+
+        String scanArea(LambdaPlayer player) {
+            audioService.playSound("scan_activate")
+            def scanResult = new StringBuilder()
+            scanResult.append(TerminalFormatter.formatText("=== AREA SCAN RESULTS ===", 'bold', 'cyan')).append('\r\n')
+            scanResult.append("Matrix Level ${player.currentMatrixLevel} Sector Analysis:\r\n")
+            scanResult.append("Position: (${player.positionX},${player.positionY})\r\n")
+
+            // Check for actual logic fragments at coordinates
+            def fragment = findFragmentAtCoordinates(player)
+            if (fragment) {
+                scanResult.append("Logic fragments detected: ${TerminalFormatter.formatText('YES', 'bold', 'green')}\r\n")
+                scanResult.append("Fragment type: ${fragment.name} (${fragment.fragmentType})\r\n")
+                scanResult.append("Power level: ${fragment.powerLevel}/10\r\n")
+                scanResult.append("Use 'cat ${fragment.name.toLowerCase().replace(' ', '_')}' to view content\r\n")
+                scanResult.append("Use 'pickup' to collect this fragment\r\n")
+            } else {
+                scanResult.append("Logic fragments detected: None\r\n")
+            }
+
+            // Classic Lambda bonus: Enhanced fragment detection range
+            if (player.fragmentDetectionBonus > 0) {
+                def extendedFragments = scanExtendedFragmentRange(player)
+                if (extendedFragments) {
+                    scanResult.append(TerminalFormatter.formatText("\r\n🔍 ENHANCED SCAN (Classic Lambda):", 'bold', 'cyan')).append('\r\n')
+                    extendedFragments.each { fragmentInfo ->
+                        scanResult.append("${fragmentInfo}\r\n")
+                    }
+                }
+            }
+
+            // Check for other players
+            def nearbyPlayers = lambdaPlayerService.getPlayersByMatrixLevel(player.currentMatrixLevel).findAll {
+                it.id != player.id && Math.abs(it.positionX - player.positionX) <= 1 && Math.abs(it.positionY - player.positionY) <= 1
+            }
+            scanResult.append("Other entities nearby: ${nearbyPlayers.size() > 0 ? "${nearbyPlayers.size()} detected" : 'None'}\r\n")
+
+            // Check for defrag bots
+            def defragBot = defragBotService.getActiveBotAt(player.currentMatrixLevel, player.positionX, player.positionY)
+            scanResult.append("Defrag processes: ${defragBot ? TerminalFormatter.formatText('WARNING: Active', 'bold', 'red') : 'Clear'}\r\n")
+
+            // Check for Lambda merchants
+            def merchant = lambdaMerchantService.getMerchantAt(player.currentMatrixLevel, player.positionX, player.positionY)
+            if (merchant) {
+                scanResult.append("Lambda merchant: ${TerminalFormatter.formatText(merchant.merchantName, 'bold', 'yellow')} (${merchant.merchantType})\r\n")
+                scanResult.append("Use 'shop' to browse their inventory\r\n")
+            } else {
+                scanResult.append("Lambda merchant: None\r\n")
+            }
+
+            // Note: Elemental symbols are hidden and only discoverable through puzzle-solving
+
+            // Check for competitive puzzle elements (player-specific coordinates)
+            def puzzleElements = puzzleService.scanForPuzzleElements(player, player.currentMatrixLevel, player.positionX, player.positionY)
+            if (puzzleElements.size() > 0) {
+                scanResult.append(TerminalFormatter.formatText("\r\n🏁 COMPETITIVE PUZZLE ELEMENTS:", 'bold', 'purple')).append('\r\n')
+                puzzleElements.each { element ->
+                    switch(element.type) {
+                        case 'player_variable':
+                            def variable = element.data
+                            def puzzleState = element.puzzleState
+                            scanResult.append("${variable.getScanDescription()}\r\n")
+                            scanResult.append("🎯 Personal ${puzzleState.elementType} puzzle variable\r\n")
+                            scanResult.append("Use 'collect_var ${variable.variableName}' to obtain\r\n")
+                            scanResult.append("⚡ WARNING: Coordinates unique to you - others have different locations!\r\n")
+                            break
+                        case 'player_puzzle_room':
+                            def room = element.data
+                            def puzzleState = element.puzzleState
+                            scanResult.append("${room.getScanDescription()}\r\n")
+                            scanResult.append("🎯 Personal ${puzzleState.elementType} puzzle chamber\r\n")
+                            scanResult.append("${room.getExecutionHint()}\r\n")
+                            scanResult.append("🏆 First to solve gets the symbol - others get new coordinates!\r\n")
+                            break
+                    }
+                }
+            }
+
+            // Check coordinate health
+            def coordinateHealth = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, player.positionX, player.positionY)
+            scanResult.append("Coordinate Health: ${TerminalFormatter.formatText("${coordinateHealth.health}% ${coordinateHealth.status}", 'bold', coordinateHealth.color)}\r\n")
+
+            // Show nearby coordinate health for awareness
+            def nearbyDamaged = []
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    if (dx == 0 && dy == 0) continue
+                    def scanX = Math.max(0, Math.min(9, player.positionX + dx))
+                    def scanY = Math.max(0, Math.min(9, player.positionY + dy))
+                    def nearbyHealth = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, scanX, scanY)
+                    if (nearbyHealth.health < 100) {
+                        nearbyDamaged.add("(${scanX},${scanY}): ${nearbyHealth.health}% ${nearbyHealth.status}")
+                    }
+                }
+            }
+
+            if (nearbyDamaged) {
+                scanResult.append("Nearby Damage: ${nearbyDamaged.join(', ')}\r\n")
+            }
+
+            scanResult.append("System stability: ${['Stable', 'Fluctuating', 'Unstable'][new Random().nextInt(3)]}\r\n")
+            return scanResult.toString()
+        }
 }

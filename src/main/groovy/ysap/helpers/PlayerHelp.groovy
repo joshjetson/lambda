@@ -367,4 +367,31 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'yellow')
 
     }
+
+    // Note: Maybe deprecated maybe useful later ??
+    private String queryTerminalSize(PrintWriter writer, BufferedReader reader) {
+        // ANSI Sequence to query terminal size
+        writer.println("Press Enter...")
+        writer.print("\033[18t")
+        writer.flush()
+
+        try {
+            // Wait and read response
+            // Response format is expected as ESC[8;<height>;<width>t
+            // Adjust this reading mechanism based on how your terminal actually responds
+            String response = reader.readLine();
+
+            // Log the raw response for debugging
+            println "Raw terminal size response: $response"
+
+            // Parsing the response to extract height and width
+            // This is a simplified example; actual parsing may vary based on response format
+            if (response && response.matches(/.*\033\[8;(\d+);(\d+)t.*/)) {
+                return response.replaceAll(/.*\033\[8;(\d+);(\d+)t.*/, '$1x$2')
+            }
+        } catch (Exception e) {
+            println "Error reading terminal size: $e"
+        }
+        return "unknown"
+    }
 }

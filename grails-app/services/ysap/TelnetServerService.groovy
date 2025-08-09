@@ -1,12 +1,13 @@
 package ysap
 
+import grails.gorm.transactions.Transactional
 import ysap.helpers.BoxBuilder
 
 import java.util.concurrent.CopyOnWriteArrayList
 import ysap.helpers.PlayerHelp
 
+@Transactional
 class TelnetServerService {
-    def pageService
     def lambdaPlayerService
     def defragBotService
     def chatService
@@ -28,41 +29,6 @@ class TelnetServerService {
     private List<PrintWriter> clientWriters = new CopyOnWriteArrayList<>() // Thread-safe list
     private Map<PrintWriter, LambdaPlayer> playerSessions = [:] // Track player sessions
     private Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters
-    private Map<PrintWriter, Boolean> clientUnicodeSupport = [:]
-
-    private boolean detectClientUnicodeSupport(InputStream input, OutputStream output) {
-        try {
-            output.write("\r\n".getBytes())
-
-            // Send all the avatar symbols
-            output.write([0xE2, 0x97, 0x8F] as byte[]) // ● DIGITAL_GHOST
-            output.write("  ".getBytes())
-            output.write([0xE2, 0x97, 0x86] as byte[]) // ◆ CIRCUIT_PATTERN
-            output.write("  ".getBytes())
-            output.write([0xE2, 0x96, 0xB2] as byte[]) // ▲ GEOMETRIC_ENTITY
-            output.write("  ".getBytes())
-            output.write([0xE2, 0x96, 0xA0] as byte[]) // ■ FLOWING_CURRENT
-            output.write("  ".getBytes())
-            output.write([0xE2, 0x97, 0x90] as byte[]) // ◐ BINARY_FORM
-            output.write("  ".getBytes())
-            output.write([0xE2, 0x9C, 0xA6] as byte[]) // ✦ CLASSIC_LAMBDA
-
-            output.flush()
-
-            int response = input.read()
-            input.read() // consume \r or \n
-
-            boolean supports = (response == 'y' || response == 'Y')
-
-            output.write("\r\n".getBytes())
-            output.flush()
-
-            return supports
-        } catch (Exception e) {
-            println "Error detecting Unicode support: ${e.message}"
-            return false
-        }
-    }
 
     String createWelcomeLogo() {
         def asciiArt = """
@@ -194,15 +160,11 @@ class TelnetServerService {
             println "Client connected. Total clients: $clientCount"
 
             updateClientCount()
-            boolean supportsUnicode = detectClientUnicodeSupport(clientSocket.getInputStream(), clientSocket.getOutputStream())
 
             def writer = new PrintWriter(clientSocket.getOutputStream(), true)
             clientWriters.add(writer)
 
             def reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
-            clientUnicodeSupport[writer] = supportsUnicode
-            println "Client Unicode support: ${supportsUnicode}"
-            println "Detected terminal size: unknown"
 
             // Animate the welcome logo
             animateWelcomeLogo(clientSocket.getOutputStream())
@@ -305,34 +267,6 @@ class TelnetServerService {
         }
     }
 
-    // Note: Maybe deprecated maybe useful later ??
-    private String queryTerminalSize(PrintWriter writer, BufferedReader reader) {
-        // ANSI Sequence to query terminal size
-        writer.println("Press Enter...")
-        writer.print("\033[18t")
-        writer.flush()
-
-        try {
-            // Wait and read response
-            // Response format is expected as ESC[8;<height>;<width>t
-            // Adjust this reading mechanism based on how your terminal actually responds
-            String response = reader.readLine();
-
-            // Log the raw response for debugging
-            println "Raw terminal size response: $response"
-
-            // Parsing the response to extract height and width
-            // This is a simplified example; actual parsing may vary based on response format
-            if (response && response.matches(/.*\033\[8;(\d+);(\d+)t.*/)) {
-                return response.replaceAll(/.*\033\[8;(\d+);(\d+)t.*/, '$1x$2')
-            }
-        } catch (Exception e) {
-            println "Error reading terminal size: $e"
-        }
-        return "unknown"
-    }
-
-
     private void updateClientCount() {
         String message = TerminalFormatter.formatText("Total clients connected: $clientCount", 'underline', 'red', 'framed')
         sendToAllClients(message)
@@ -343,44 +277,40 @@ class TelnetServerService {
         try {
             writer.println(TerminalFormatter.formatText("=== LAMBDA ENTITY AUTHENTICATION ===", 'bold', 'cyan'))
             writer.println()
-            writer.print("Enter username (or 'new' to create): ")
+            writer.print("Enter username (or 'new' to create) ('quit' or 'exit' to leave): ")
             writer.flush()
             while (reader.ready()) {
                 reader.read() // Consume and discard each character
             }
 
             def username = reader.readLine()?.trim()?.toLowerCase() ?: ""
-
-
-            if (username.contains('quit') || username.contains('exit')){
-                writer.println()
-                writer.println('========== Thanks for Playing ============')
-                writer.println('========== GOODBYE! ============')
-                return
+            switch (true){
+                case username.contains('quit'):
+                case username.contains('exit'):
+                    writer.println()
+                    writer.println('========== Thanks for Playing ============')
+                    writer.println('========== GOODBYE! ============')
+                    return
+                case username.contains('new'):
+                case username.equalsIgnoreCase('new'):
+                    return createNewPlayer(writer, reader)
+                case username == '':
+                    return handlePlayerLogin(writer, reader)
             }
 
-            username = username.contains('new') ? 'new' : ''
-
-            if (username != 'new' || !username){
-                writer.println()
+            def player = LambdaPlayer.withNewSession {
+                LambdaPlayer.findByUsername(username)
             }
 
-            if (username.equalsIgnoreCase('new')) {
-                return createNewPlayer(writer, reader)
-            } else {
-                def player = null
-                LambdaPlayer.withTransaction {
-                    player = LambdaPlayer.findByUsername(username)
-                }
-                if (player) {
-                    writer.println(TerminalFormatter.formatText("Lambda entity ${player.displayName} authenticated!", 'bold', 'green'))
-                    audioService.playSound("login")
-                    return player
-                } else {
-                    writer.println(TerminalFormatter.formatText("Entity not found. Creating new Lambda...", 'italic', 'yellow'))
-                    return createPlayerWithUsername(writer, reader, username)
-                }
+            if (player){
+                writer.println(TerminalFormatter.formatText("Lambda entity ${player.displayName} authenticated!", 'bold', 'green'))
+                audioService.playSound("login")
+                return player
             }
+
+            writer.println()
+            return handlePlayerLogin(writer, reader)
+
         } catch (Exception e) {
             writer.println(TerminalFormatter.formatText("Authentication error: ${e.message}", 'bold', 'red'))
             return null
@@ -445,7 +375,6 @@ class TelnetServerService {
         writer.println()
 //        writer.println(player.asciiFace)
 
-        // Get player stats
         // Get player stats
         def fragmentCount = 0
         def skillCount = 0
@@ -557,7 +486,7 @@ class TelnetServerService {
             case 'cc':
                 return handleCoordinateChange(command, player, writer)
             case 'scan':
-                return scanArea(player)
+                return gameSessionService.scanArea(player)
             case 'inventory':
                 return showInventory(player)
             case 'heap':
@@ -843,110 +772,8 @@ class TelnetServerService {
         def moveMessage = "Lambda entity changed coordinates to (${newX},${newY})"
         return TerminalFormatter.formatText(moveMessage, 'bold', 'green')
     }
-    
-    private String scanArea(LambdaPlayer player) {
-        audioService.playSound("scan_activate")
-        def scanResult = new StringBuilder()
-        scanResult.append(TerminalFormatter.formatText("=== AREA SCAN RESULTS ===", 'bold', 'cyan')).append('\n')
-        scanResult.append("Matrix Level ${player.currentMatrixLevel} Sector Analysis:\n")
-        scanResult.append("Position: (${player.positionX},${player.positionY})\n")
-        
-        // Check for actual logic fragments at coordinates
-        def fragment = findFragmentAtCoordinates(player)
-        if (fragment) {
-            scanResult.append("Logic fragments detected: ${TerminalFormatter.formatText('YES', 'bold', 'green')}\n")
-            scanResult.append("Fragment type: ${fragment.name} (${fragment.fragmentType})\n")
-            scanResult.append("Power level: ${fragment.powerLevel}/10\n")
-            scanResult.append("Use 'cat ${fragment.name.toLowerCase().replace(' ', '_')}' to view content\n")
-            scanResult.append("Use 'pickup' to collect this fragment\n")
-        } else {
-            scanResult.append("Logic fragments detected: None\n")
-        }
-        
-        // Classic Lambda bonus: Enhanced fragment detection range
-        if (player.fragmentDetectionBonus > 0) {
-            def extendedFragments = scanExtendedFragmentRange(player)
-            if (extendedFragments) {
-                scanResult.append(TerminalFormatter.formatText("\n🔍 ENHANCED SCAN (Classic Lambda):", 'bold', 'cyan')).append('\n')
-                extendedFragments.each { fragmentInfo ->
-                    scanResult.append("${fragmentInfo}\n")
-                }
-            }
-        }
-        
-        // Check for other players
-        def nearbyPlayers = lambdaPlayerService.getPlayersByMatrixLevel(player.currentMatrixLevel).findAll { 
-            it.id != player.id && Math.abs(it.positionX - player.positionX) <= 1 && Math.abs(it.positionY - player.positionY) <= 1 
-        }
-        scanResult.append("Other entities nearby: ${nearbyPlayers.size() > 0 ? "${nearbyPlayers.size()} detected" : 'None'}\n")
-        
-        // Check for defrag bots
-        def defragBot = defragBotService.getActiveBotAt(player.currentMatrixLevel, player.positionX, player.positionY)
-        scanResult.append("Defrag processes: ${defragBot ? TerminalFormatter.formatText('WARNING: Active', 'bold', 'red') : 'Clear'}\n")
-        
-        // Check for Lambda merchants
-        def merchant = lambdaMerchantService.getMerchantAt(player.currentMatrixLevel, player.positionX, player.positionY)
-        if (merchant) {
-            scanResult.append("Lambda merchant: ${TerminalFormatter.formatText(merchant.merchantName, 'bold', 'yellow')} (${merchant.merchantType})\n")
-            scanResult.append("Use 'shop' to browse their inventory\n")
-        } else {
-            scanResult.append("Lambda merchant: None\n")
-        }
-        
-        // Note: Elemental symbols are hidden and only discoverable through puzzle-solving
-        
-        // Check for competitive puzzle elements (player-specific coordinates)
-        def puzzleElements = puzzleService.scanForPuzzleElements(player, player.currentMatrixLevel, player.positionX, player.positionY)
-        if (puzzleElements.size() > 0) {
-            scanResult.append(TerminalFormatter.formatText("\n🏁 COMPETITIVE PUZZLE ELEMENTS:", 'bold', 'purple')).append('\n')
-            puzzleElements.each { element ->
-                switch(element.type) {
-                    case 'player_variable':
-                        def variable = element.data
-                        def puzzleState = element.puzzleState
-                        scanResult.append("${variable.getScanDescription()}\n")
-                        scanResult.append("🎯 Personal ${puzzleState.elementType} puzzle variable\n")
-                        scanResult.append("Use 'collect_var ${variable.variableName}' to obtain\n")
-                        scanResult.append("⚡ WARNING: Coordinates unique to you - others have different locations!\n")
-                        break
-                    case 'player_puzzle_room':
-                        def room = element.data
-                        def puzzleState = element.puzzleState
-                        scanResult.append("${room.getScanDescription()}\n")
-                        scanResult.append("🎯 Personal ${puzzleState.elementType} puzzle chamber\n")
-                        scanResult.append("${room.getExecutionHint()}\n")
-                        scanResult.append("🏆 First to solve gets the symbol - others get new coordinates!\n")
-                        break
-                }
-            }
-        }
-        
-        // Check coordinate health
-        def coordinateHealth = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, player.positionX, player.positionY)
-        scanResult.append("Coordinate Health: ${TerminalFormatter.formatText("${coordinateHealth.health}% ${coordinateHealth.status}", 'bold', coordinateHealth.color)}\n")
-        
-        // Show nearby coordinate health for awareness
-        def nearbyDamaged = []
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                if (dx == 0 && dy == 0) continue
-                def scanX = Math.max(0, Math.min(9, player.positionX + dx))
-                def scanY = Math.max(0, Math.min(9, player.positionY + dy))
-                def nearbyHealth = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, scanX, scanY)
-                if (nearbyHealth.health < 100) {
-                    nearbyDamaged.add("(${scanX},${scanY}): ${nearbyHealth.health}% ${nearbyHealth.status}")
-                }
-            }
-        }
-        
-        if (nearbyDamaged) {
-            scanResult.append("Nearby Damage: ${nearbyDamaged.join(', ')}\n")
-        }
-        
-        scanResult.append("System stability: ${['Stable', 'Fluctuating', 'Unstable'][new Random().nextInt(3)]}\n")
-        return scanResult.toString()
-    }
-    
+
+
     private String showInventory(LambdaPlayer player) {
         def inventory = new StringBuilder()
         
@@ -2487,7 +2314,7 @@ class TelnetServerService {
     private String getPlayerPrompt(LambdaPlayer player, PrintWriter writer) {
         // Use player's avatar as prompt symbol instead of generic $
         def output = new StringBuilder()
-        def avatarSymbol = getAvatarSymbol(player.avatarSilhouette, writer)  // Pass writer here
+        def avatarSymbol = getAvatarSymbol(player.avatarSilhouette)  // Pass writer here
         def matrixLevel = player.currentMatrixLevel ?: 1
         def coordinates = "(${player.positionX ?: 0},${player.positionY ?: 0})"
 
@@ -2501,31 +2328,16 @@ class TelnetServerService {
         return output.toString()
     }
 
-    private String getAvatarSymbol(String avatarType, PrintWriter clientWriter) {
+    private String getAvatarSymbol(String avatarType) {
         // Check if THIS CLIENT'S terminal supports Unicode
-        boolean supportsUnicode = clientUnicodeSupport[clientWriter] ?: true
-
-        if (supportsUnicode) {
-            switch (avatarType) {
-                case 'DIGITAL_GHOST': return '\u25CF'
-                case 'CIRCUIT_PATTERN': return '\u25C6'
-                case 'GEOMETRIC_ENTITY': return '\u25B2'
-                case 'FLOWING_CURRENT': return '\u25A0'
-                case 'BINARY_FORM': return '\u25D0'
-                case 'CLASSIC_LAMBDA': return '\u2726'
-                default: return '\u039B'
-            }
-        } else {
-            // ASCII fallback
-            switch (avatarType) {
-                case 'DIGITAL_GHOST': return '@'
-                case 'CIRCUIT_PATTERN': return '#'
-                case 'GEOMETRIC_ENTITY': return '^'
-                case 'FLOWING_CURRENT': return '='
-                case 'BINARY_FORM': return '%'
-                case 'CLASSIC_LAMBDA': return '*'
-                default: return '>'
-            }
+        switch (avatarType) {
+            case 'DIGITAL_GHOST': return '\u25CF'
+            case 'CIRCUIT_PATTERN': return '\u25C6'
+            case 'GEOMETRIC_ENTITY': return '\u25B2'
+            case 'FLOWING_CURRENT': return '\u25A0'
+            case 'BINARY_FORM': return '\u25D0'
+            case 'CLASSIC_LAMBDA': return '\u2726'
+            default: return '\u039B'
         }
     }
 
@@ -2587,7 +2399,7 @@ class TelnetServerService {
 
                     // Check for fragment (lower priority than defrag bot)
                     else if (symbol == "." || symbol == "!") {
-                        def fragment = findFragmentAtCoordinates(player.currentMatrixLevel, x, y)
+                        def fragment = gameSessionService.getFragmentAtCoordinates(player.currentMatrixLevel, x, y)
                         if (fragment) {
                             symbol = "F"
                             colorCode = "1;32" // bold green
@@ -2726,12 +2538,7 @@ class TelnetServerService {
         
         return files.toString()
     }
-    
-    // Helper method for map generation - use game session service
-    private def findFragmentAtCoordinates(Integer matrixLevel, Integer x, Integer y) {
-        return gameSessionService.getFragmentAtCoordinates(matrixLevel, x, y)
-    }
-    
+
     private String viewEntropyMonitor(LambdaPlayer player) {
         def monitor = new StringBuilder()
         def entropyStatus = entropyService.getEntropyStatus(player)

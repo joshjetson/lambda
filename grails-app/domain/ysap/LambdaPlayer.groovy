@@ -96,7 +96,4 @@ class LambdaPlayer {
         asciiFace type: 'text'
     }
     
-    String toString() {
-        return displayName
-    }
 }
