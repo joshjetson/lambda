@@ -27,8 +27,8 @@ class TelnetServerService {
     private ServerSocket serverSocket
     private int clientCount = 0
     private List<PrintWriter> clientWriters = new CopyOnWriteArrayList<>() // Thread-safe list
-    private Map<PrintWriter, LambdaPlayer> playerSessions = [:] // Track player sessions
-    private Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters
+    public Map<PrintWriter, LambdaPlayer> playerSessions = [:] // Track player sessions
+    public Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters
 
     String createWelcomeLogo() {
         def asciiArt = """
@@ -479,12 +479,12 @@ class TelnetServerService {
         
         def parts = command.trim().toLowerCase().split(' ')
         def cmd = parts[0]
-        
+       //TODO: Put all the logic for each case in its respective service and out of this TelnetServerService
         switch (cmd) {
             case 'status':
                 return lambdaPlayerService.getPlayerStatus(player)
             case 'cc':
-                return handleCoordinateChange(command, player, writer)
+                return coordinateStateService.handleCoordinateChange(command, player, writer)
             case 'scan':
                 return gameSessionService.scanArea(player)
             case 'inventory':
@@ -565,151 +565,6 @@ class TelnetServerService {
     
 
     
-    private String handleCoordinateChange(String command, LambdaPlayer player, PrintWriter writer) {
-        def parts = command.trim().split(' ')
-        
-        // Validate command format: cc (x,y) or cc x,y or cc x y
-        if (parts.length < 2) {
-            return "Usage: cc (x,y) - Change coordinates to specific position"
-        }
-        
-        def coordinateString = parts[1..-1].join(' ').trim()
-        def newX, newY
-        
-        // Parse different coordinate formats
-        if (coordinateString.startsWith('(') && coordinateString.endsWith(')')) {
-            // Format: cc (2,6)
-            coordinateString = coordinateString.substring(1, coordinateString.length() - 1)
-        }
-        
-        if (coordinateString.contains(',')) {
-            // Format: cc 2,6 or cc (2,6)
-            def coords = coordinateString.split(',')
-            if (coords.length != 2) {
-                return "Invalid coordinate format. Use: cc (x,y) or cc x,y"
-            }
-            try {
-                newX = Integer.parseInt(coords[0].trim())
-                newY = Integer.parseInt(coords[1].trim())
-            } catch (NumberFormatException e) {
-                return "Invalid coordinates. Use numbers only: cc (x,y)"
-            }
-        } else if (parts.length >= 3) {
-            // Format: cc 2 6
-            try {
-                newX = Integer.parseInt(parts[1].trim())
-                newY = Integer.parseInt(parts[2].trim())
-            } catch (NumberFormatException e) {
-                return "Invalid coordinates. Use numbers only: cc x y"
-            }
-        } else {
-            return "Invalid coordinate format. Use: cc (x,y), cc x,y, or cc x y"
-        }
-        
-        // Constrain coordinates to matrix bounds (0-9)
-        if (newX < 0 || newX > 9 || newY < 0 || newY > 9) {
-            return "Coordinates must be within matrix bounds (0-9). Requested: (${newX},${newY})"
-        }
-        
-        // Check if coordinate change is allowed (accessibility)
-        def movementCheck = coordinateStateService.canPlayerMoveToCoordinate(player, newX, newY)
-        if (!movementCheck.allowed) {
-            return TerminalFormatter.formatText("Coordinate change blocked: ${movementCheck.reason}", 'bold', 'red')
-        }
-        
-        // Calculate movement direction for audio feedback
-        def deltaX = newX - player.positionX
-        def deltaY = newY - player.positionY
-        
-        // Play appropriate movement sound based on primary direction
-        if (Math.abs(deltaX) > Math.abs(deltaY)) {
-            if (deltaX > 0) {
-                audioService.playSound("move_east")
-            } else {
-                audioService.playSound("move_west")
-            }
-        } else {
-            if (deltaY > 0) {
-                audioService.playSound("move_north")
-            } else {
-                audioService.playSound("move_south")
-            }
-        }
-        
-        lambdaPlayerService.movePlayer(player, player.currentMatrixLevel, newX, newY)
-        
-        // Update the player object in the session with new coordinates
-        LambdaPlayer.withTransaction {
-            def updatedPlayer = LambdaPlayer.get(player.id)
-            if (updatedPlayer) {
-                playerSessions[writer] = updatedPlayer
-                player.positionX = updatedPlayer.positionX
-                player.positionY = updatedPlayer.positionY
-            }
-        }
-        
-        updatePlayerPositionOnBoard(player)
-        
-        // Check for defrag bot encounter with floor-based difficulty scaling
-        def floorNumber = newX // Floor 0 = coordinates 0,0-0,9, Floor 1 = 1,0-1,9, etc.
-        
-        // Floor-based encounter rates: Early floors are much safer
-        def baseEncounterChance
-        switch (floorNumber) {
-            case 0:
-            case 1: 
-                baseEncounterChance = 0.02 // 2% chance on floors 0-1 (very safe)
-                break
-            case 2:
-                baseEncounterChance = 0.05 // 5% chance on floor 2 (safe)
-                break
-            case 3:
-            case 4:
-                baseEncounterChance = 0.10 // 10% chance on floors 3-4 (normal)
-                break
-            case 5:
-            case 6:
-                baseEncounterChance = 0.15 // 15% chance on floors 5-6 (challenging)
-                break
-            default:
-                baseEncounterChance = 0.20 // 20% chance on floors 7+ (dangerous)
-                break
-        }
-        
-        // Safe zone: No defrag bots in starting area
-        def inSafeZone = (newX <= 1 && newY <= 1)
-        
-        // Apply recursion stealth bonus (if active) and roll for encounter
-        def totalAvoidanceBonus = (player.stealthBonus ?: 0.0) // Only active recursion bonuses count
-        def encounterChance = baseEncounterChance * (1.0 - Math.min(0.8, totalAvoidanceBonus))
-        
-        if (!inSafeZone && Math.random() < encounterChance) {
-            def defragBot = defragBotService.spawnDefragBot(player.currentMatrixLevel, 1, newX, newY)
-            if (defragBot) {
-                activeDefragSessions[writer] = defragBot
-                
-                def encounter = new StringBuilder()
-                encounter.append(TerminalFormatter.formatText("Lambda entity changed coordinates to (${newX},${newY})", 'bold', 'green')).append('\n')
-                encounter.append(TerminalFormatter.formatText("⚠️  DEFRAG BOT ENCOUNTERED!", 'bold', 'red')).append('\n')
-                encounter.append(TerminalFormatter.formatText("System defragmentation process ${defragBot.botId} detected", 'italic', 'yellow')).append('\n')
-                encounter.append(TerminalFormatter.formatText("Time limit: ${defragBot.timeLimit} seconds", 'bold', 'red')).append('\n')
-                encounter.append("Type 'defrag -h' to analyze the defrag process or face system buffer clearing!")
-                
-                return encounter.toString()
-            }
-        }
-        
-        // Logic gate encounters on floors 7+ at coordinates >= (7,1)
-        if (newX >= 7 && newY >= 1) {
-            def gateCheck = Math.random()
-            if (gateCheck < 0.15) { // 15% chance of logic gate
-                return TerminalFormatter.formatText("Lambda entity moved to (${newX},${newY})\n⚡ LOGIC GATE DETECTED - Implementation pending", 'bold', 'cyan')
-            }
-        }
-        
-        def moveMessage = "Lambda entity changed coordinates to (${newX},${newY})"
-        return TerminalFormatter.formatText(moveMessage, 'bold', 'green')
-    }
 
 
     private String showInventory(LambdaPlayer player) {
@@ -1370,12 +1225,7 @@ class TelnetServerService {
     }
     
     
-    private void updatePlayerPositionOnBoard(LambdaPlayer player) {
-        // TODO: Implement GPIO LED updates for physical board
-        // This will light up the LED corresponding to the player's position
-        println "Updating board position for ${player.displayName} at Matrix Level ${player.currentMatrixLevel} (${player.positionX},${player.positionY})"
-    }
-    
+
     private String enterMingle(LambdaPlayer player, PrintWriter writer) {
         lambdaPlayerService.setMingleStatus(player, true)
         
