@@ -5,6 +5,7 @@ import ysap.helpers.BoxBuilder
 
 @Transactional
 class LambdaPlayerService {
+    def EntropyService
 
     def createPlayer(String username, String displayName, String avatarSilhouette) {
         def player = new LambdaPlayer(
@@ -422,5 +423,68 @@ class LambdaPlayerService {
         ]
 
         return avatarData[avatarType] ?: avatarData['CLASSIC_LAMBDA']
+    }
+
+    String getPlayerStatus(LambdaPlayer player) {
+        def status = new StringBuilder()
+        def entropyStatus = entropyService.getEntropyStatus(player)
+
+        status.append(TerminalFormatter.formatText("=== DETAILED LAMBDA STATUS ===", 'bold', 'cyan')).append('\r\n')
+        status.append("Entity: ${player.displayName}\r\n")
+        status.append("Matrix Level: ${player.currentMatrixLevel}/10\r\n")
+        status.append("Coordinates: (${player.positionX},${player.positionY})\r\n")
+        status.append("Bits: ${player.bits}\r\n")
+        def currentEntropy = entropyStatus.currentEntropy ?: 100.0
+        status.append("Digital Coherence: ${TerminalFormatter.formatText("${currentEntropy}%", entropyService.getEntropyColor(currentEntropy), 'bold')}\r\n")
+
+        def miningRewards = entropyStatus.miningRewards ?: 0
+        if (miningRewards > 0) {
+            status.append("Mining Rewards: ${TerminalFormatter.formatText("+${miningRewards} bits", 'bold', 'green')} (use 'mining')\r\n")
+        }
+
+        def fusionAttempts = entropyService.getFragmentFusionAttempts(player)
+        def remainingAttempts = fusionAttempts.remaining ?: 0
+        if (remainingAttempts > 0) {
+            status.append("Fusion Attempts: ${TerminalFormatter.formatText("${remainingAttempts} remaining", 'bold', 'yellow')}\r\n")
+        }
+
+        status.append("Online Lambda Entities: ${this.getOnlinePlayers().size()}\r\n")
+        status.append("Entities in Current Matrix Level: ${this.getPlayersByMatrixLevel(player.currentMatrixLevel).size()}\r\n")
+
+        // Fix Hibernate session issues by using transaction
+        LambdaPlayer.withTransaction {
+            def managedPlayer = LambdaPlayer.get(player.id)
+            if (managedPlayer) {
+                status.append("Logic Fragments: ${managedPlayer.logicFragments?.size() ?: 0}\r\n")
+                status.append("Special Items: ${managedPlayer.specialItems?.size() ?: 0}\r\n")
+            } else {
+                status.append("Logic Fragments: 0\r\n")
+                status.append("Special Items: 0\r\n")
+            }
+        }
+
+        // Show ethnicity bonuses if player has any
+        def bonuses = []
+        if (player.fragmentDetectionBonus > 0) bonuses.add("Enhanced Scan (+${Math.round(player.fragmentDetectionBonus * 100)}%)")
+        if (player.defragResistanceBonus > 0) bonuses.add("Defrag Resistance (+${Math.round(player.defragResistanceBonus * 100)}%)")
+        if (player.movementRangeBonus > 0) bonuses.add("Movement Range (+${player.movementRangeBonus})")
+        if (player.miningEfficiencyBonus > 0) bonuses.add("Mining Efficiency (+${Math.round(player.miningEfficiencyBonus * 100)}%)")
+        if (player.stealthBonus > 0) bonuses.add("Stealth (+${Math.round(player.stealthBonus * 100)}%)")
+        if (player.fusionSuccessBonus > 0) bonuses.add("Fusion Success (+${Math.round(player.fusionSuccessBonus * 100)}%)")
+
+        if (bonuses) {
+            status.append("Ethnicity Bonuses: ${TerminalFormatter.formatText(bonuses.join(', '), 'bold', 'magenta')}\r\n")
+        }
+
+        def canRefresh = entropyStatus.canRefresh ?: false
+        def timeUntilRefresh = entropyStatus.timeUntilRefresh ?: 0
+
+        if (canRefresh) {
+            status.append('\r\n').append(TerminalFormatter.formatText("🔋 Daily entropy refresh available!", 'bold', 'green'))
+        } else if (currentEntropy < 50) {
+            status.append('\r\n').append(TerminalFormatter.formatText("⚠️  Low coherence - refresh in ${timeUntilRefresh}h", 'bold', 'yellow'))
+        }
+
+        return status.toString()
     }
 }

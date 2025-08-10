@@ -482,7 +482,7 @@ class TelnetServerService {
         
         switch (cmd) {
             case 'status':
-                return getPlayerStatus(player)
+                return lambdaPlayerService.getPlayerStatus(player)
             case 'cc':
                 return handleCoordinateChange(command, player, writer)
             case 'scan':
@@ -563,69 +563,7 @@ class TelnetServerService {
         }
     }
     
-    private String getPlayerStatus(LambdaPlayer player) {
-        def status = new StringBuilder()
-        def entropyStatus = entropyService.getEntropyStatus(player)
-        
-        status.append(TerminalFormatter.formatText("=== DETAILED LAMBDA STATUS ===", 'bold', 'cyan')).append('\n')
-        status.append("Entity: ${player.displayName}\n")
-        status.append("Matrix Level: ${player.currentMatrixLevel}/10\n")
-        status.append("Coordinates: (${player.positionX},${player.positionY})\n")
-        status.append("Bits: ${player.bits}\n")
-        def currentEntropy = entropyStatus.currentEntropy ?: 100.0
-        status.append("Digital Coherence: ${TerminalFormatter.formatText("${currentEntropy}%", getEntropyColor(currentEntropy), 'bold')}\n")
-        
-        def miningRewards = entropyStatus.miningRewards ?: 0
-        if (miningRewards > 0) {
-            status.append("Mining Rewards: ${TerminalFormatter.formatText("+${miningRewards} bits", 'bold', 'green')} (use 'mining')\n")
-        }
-        
-        def fusionAttempts = entropyService.getFragmentFusionAttempts(player)
-        def remainingAttempts = fusionAttempts.remaining ?: 0
-        if (remainingAttempts > 0) {
-            status.append("Fusion Attempts: ${TerminalFormatter.formatText("${remainingAttempts} remaining", 'bold', 'yellow')}\n")
-        }
-        
-        status.append("Online Lambda Entities: ${lambdaPlayerService.getOnlinePlayers().size()}\n")
-        status.append("Entities in Current Matrix Level: ${lambdaPlayerService.getPlayersByMatrixLevel(player.currentMatrixLevel).size()}\n")
-        
-        // Fix Hibernate session issues by using transaction
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (managedPlayer) {
-                status.append("Logic Fragments: ${managedPlayer.logicFragments?.size() ?: 0}\n")
-                status.append("Special Items: ${managedPlayer.specialItems?.size() ?: 0}\n")
-            } else {
-                status.append("Logic Fragments: 0\n")
-                status.append("Special Items: 0\n")
-            }
-        }
-        
-        // Show ethnicity bonuses if player has any
-        def bonuses = []
-        if (player.fragmentDetectionBonus > 0) bonuses.add("Enhanced Scan (+${Math.round(player.fragmentDetectionBonus * 100)}%)")
-        if (player.defragResistanceBonus > 0) bonuses.add("Defrag Resistance (+${Math.round(player.defragResistanceBonus * 100)}%)")
-        if (player.movementRangeBonus > 0) bonuses.add("Movement Range (+${player.movementRangeBonus})")
-        if (player.miningEfficiencyBonus > 0) bonuses.add("Mining Efficiency (+${Math.round(player.miningEfficiencyBonus * 100)}%)")
-        if (player.stealthBonus > 0) bonuses.add("Stealth (+${Math.round(player.stealthBonus * 100)}%)")
-        if (player.fusionSuccessBonus > 0) bonuses.add("Fusion Success (+${Math.round(player.fusionSuccessBonus * 100)}%)")
-        
-        if (bonuses) {
-            status.append("Ethnicity Bonuses: ${TerminalFormatter.formatText(bonuses.join(', '), 'bold', 'magenta')}\n")
-        }
-        
-        def canRefresh = entropyStatus.canRefresh ?: false
-        def timeUntilRefresh = entropyStatus.timeUntilRefresh ?: 0
-        
-        if (canRefresh) {
-            status.append('\n').append(TerminalFormatter.formatText("🔋 Daily entropy refresh available!", 'bold', 'green'))
-        } else if (currentEntropy < 50) {
-            status.append('\n').append(TerminalFormatter.formatText("⚠️  Low coherence - refresh in ${timeUntilRefresh}h", 'bold', 'yellow'))
-        }
-        
-        return status.toString()
-    }
-    
+
     
     private String handleCoordinateChange(String command, LambdaPlayer player, PrintWriter writer) {
         def parts = command.trim().split(' ')
@@ -1105,7 +1043,7 @@ class TelnetServerService {
         
         display.append(TerminalFormatter.formatText("=== DIGITAL ENTROPY STATUS ===", 'bold', 'cyan')).append('\n')
         display.append("Entity: ${player.displayName}\n")
-        display.append("Current Coherence: ${TerminalFormatter.formatText("${currentEntropy}%", getEntropyColor(currentEntropy), 'bold')}\n")
+        display.append("Current Coherence: ${TerminalFormatter.formatText("${currentEntropy}%", entropyService.getEntropyColor(currentEntropy), 'bold')}\n")
         display.append("Hours Offline: ${hoursOffline}\n")
         display.append("Decay Rate: ${decayRate}\n\n")
         
@@ -1300,14 +1238,7 @@ class TelnetServerService {
         return response.toString()
     }
     
-    private String getEntropyColor(Double entropy) {
-        def safeEntropy = entropy ?: 100.0
-        if (safeEntropy >= 75) return 'green'
-        if (safeEntropy >= 50) return 'yellow'
-        if (safeEntropy >= 25) return 'red'
-        return 'red'
-    }
-    
+
     private List findFusibleFragments(LambdaPlayer player) {
         def fragments = []
         LambdaPlayer.withTransaction {
@@ -2545,7 +2476,7 @@ class TelnetServerService {
         
         monitor.append(TerminalFormatter.formatText("=== ENTROPY MONITOR v3.7.2 ===", 'bold', 'cyan')).append('\n')
         monitor.append("Entity: ${player.displayName}\n")
-        monitor.append("Coherence Level: ${TerminalFormatter.formatText("${entropyStatus.currentEntropy ?: 100.0}%", getEntropyColor(entropyStatus.currentEntropy ?: 100.0), 'bold')}\n")
+        monitor.append("Coherence Level: ${TerminalFormatter.formatText("${entropyStatus.currentEntropy ?: 100.0}%", entropyService.getEntropyColor(entropyStatus.currentEntropy ?: 100.0), 'bold')}\n")
         monitor.append("Status: ${getEntropyStatusText(entropyStatus.currentEntropy ?: 100.0)}\n\n")
         
         monitor.append("=== DEGRADATION ANALYSIS ===\n")

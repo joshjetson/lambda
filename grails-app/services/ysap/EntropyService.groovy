@@ -7,6 +7,14 @@ import groovy.json.JsonSlurper
 @Transactional
 class EntropyService {
 
+    String getEntropyColor(Double entropy) {
+        def safeEntropy = entropy ?: 100.0
+        if (safeEntropy >= 75) return 'green'
+        if (safeEntropy >= 50) return 'yellow'
+        if (safeEntropy >= 25) return 'red'
+        return 'red'
+    }
+
     def calculateEntropyDecay(LambdaPlayer player) {
         // Initialize entropy system for existing players
         initializeEntropyFields(player)
