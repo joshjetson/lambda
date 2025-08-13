@@ -268,7 +268,7 @@ class TelnetServerService {
     }
 
     private void updateClientCount() {
-        String message = TerminalFormatter.formatText("Total clients connected: $clientCount", 'underline', 'red', 'framed')
+        String message = TerminalFormatter.formatText("Total clients connected: $clientCount \r\n", 'underline', 'red', 'framed')
         sendToAllClients(message)
     }
 
@@ -462,6 +462,7 @@ class TelnetServerService {
         }
         
         // Refresh player state and check if player is in mingle mode
+        // Note: isInMingle is really is in chat
         def isInMingle = false
         LambdaPlayer.withTransaction { 
             def refreshedPlayer = LambdaPlayer.get(player.id)
@@ -474,7 +475,7 @@ class TelnetServerService {
         
         if (isInMingle) {
             def refreshedPlayer = playerSessions[writer]
-            return handleMingleCommand(command, refreshedPlayer, writer)
+            return chatService.handleChatCommand(command, refreshedPlayer, writer)
         }
         
         def parts = command.trim().toLowerCase().split(' ')
@@ -488,9 +489,9 @@ class TelnetServerService {
             case 'scan':
                 return gameSessionService.scanArea(player)
             case 'inventory':
-                return showInventory(player)
+                return lambdaPlayerService.showInventory(player)
             case 'heap':
-                return enterMingle(player, writer)
+                return chatService.enterChat(player, writer)
             case 'defrag':
                 return handleDefragCommand(command, player, writer)
             case 'cat':
@@ -562,73 +563,7 @@ class TelnetServerService {
                 return "Unknown command: $command. Type 'help' for available commands.\r\n"
         }
     }
-    
 
-    
-
-
-    private String showInventory(LambdaPlayer player) {
-        def inventory = new StringBuilder()
-        
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (managedPlayer) {
-                inventory.append(TerminalFormatter.formatText("=== LAMBDA INVENTORY ===", 'bold', 'cyan')).append('\n')
-                inventory.append("Bits: ${TerminalFormatter.formatText(managedPlayer.bits.toString(), 'bold', 'green')}\n\n")
-                
-                inventory.append("Logic Fragments:\n")
-                def validFragments = managedPlayer.logicFragments?.findAll { it != null }
-                if (validFragments?.size() > 0) {
-                    validFragments.each { fragment ->
-                        if (fragment?.name) {
-                            inventory.append("  • ${fragment.name} (${fragment.fragmentType}) - Level ${fragment.powerLevel}\n")
-                        }
-                    }
-                } else {
-                    inventory.append("  No logic fragments acquired\n")
-                }
-                
-                inventory.append("\nSpecial Items:\n")
-                def validItems = managedPlayer.specialItems?.findAll { it != null }
-                if (validItems?.size() > 0) {
-                    validItems.each { item ->
-                        if (item?.name) {
-                            def usesText = item.isPermanent ? "[PERMANENT]" : "[${item.usesRemaining}/${item.maxUses} uses]"
-                            def activeText = item.isActive ? " [ACTIVE]" : ""
-                            inventory.append("  • ${item.name} ${usesText}${activeText}\n")
-                            inventory.append("    ${item.description}\n")
-                            if (item.expiresAt && item.isActive) {
-                                def now = new Date()
-                                def timeLeft = ((item.expiresAt.time - now.time) / 1000).toInteger()
-                                if (timeLeft > 0) {
-                                    inventory.append("    Expires in: ${timeLeft} seconds\n")
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    inventory.append("  No special items acquired\n")
-                }
-                
-                inventory.append("\nSkills:\n")
-                def validSkills = managedPlayer.skills?.findAll { it != null }
-                if (validSkills?.size() > 0) {
-                    validSkills.each { skill ->
-                        if (skill?.skillName) {
-                            inventory.append("  • ${skill.skillName} - Level ${skill.level} (${skill.experience} XP)\n")
-                        }
-                    }
-                } else {
-                    inventory.append("  No skills acquired\n")
-                }
-            } else {
-                inventory.append("Error: Player not found\n")
-            }
-        }
-        
-        return inventory.toString()
-    }
-    
     private String handleUseCommand(String command, LambdaPlayer player) {
         def parts = command.trim().split(' ', 2)
         if (parts.length < 2) {
@@ -739,9 +674,9 @@ class TelnetServerService {
         // Handle system files from ls command
         switch (filename) {
             case 'status_log':
-                return getPlayerStatus(player)
+                return lambdaPlayerService.getPlayerStatus(player)
             case 'inventory_data':
-                return showInventory(player)
+                return lambdaPlayerService.showInventory(player)
             case 'entropy_monitor':
                 return viewEntropyMonitor(player)
             case 'system_map':
@@ -1226,116 +1161,8 @@ class TelnetServerService {
     
     
 
-    private String enterMingle(LambdaPlayer player, PrintWriter writer) {
-        lambdaPlayerService.setMingleStatus(player, true)
-        
-        // Send system message and broadcast to others
-        def systemMsg = "${player.displayName} enters the heap"
-        chatService.sendSystemMessage(systemMsg)
-        
-        def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
-        def broadcastMsg = "[${timeStr}] ${TerminalFormatter.formatText('[SYSTEM]', 'bold', 'red')} ${systemMsg}"
-        broadcastToMingleUsers(broadcastMsg)
-        
-        // Show recent messages to the entering player
-        def recentMessages = chatService.getRecentMessages(15)
-        def display = new StringBuilder()
-        display.append(TerminalFormatter.formatText("=== HEAP SPACE ===", 'bold', 'cyan')).append('\r\n')
-        display.append(TerminalFormatter.formatText("IRC-style chat • Type 'echo <message>' to talk • 'exit' to leave", 'italic', 'yellow')).append('\r\n')
-        display.append("─" * 80).append('\r\n')
-        
-        recentMessages.each { msg ->
-            display.append(chatService.formatMessageByType(msg)).append('\r\n')
-        }
-        
-        display.append("─" * 80).append('\r\n')
-        display.append(TerminalFormatter.formatText("You are now in heap space. Use 'echo <message>' to chat.", 'bold', 'green'))
-        display.append("\r\n")
 
-        return display.toString()
-    }
-    
-    private String handleMingleCommand(String command, LambdaPlayer player, PrintWriter writer) {
-        def trimmedCommand = command.trim()
-        def output = new StringBuilder()
 
-        if (trimmedCommand.equalsIgnoreCase('exit')) {
-            lambdaPlayerService.setMingleStatus(player, false)
-            
-            // Broadcast exit message to remaining users
-            output.append("${player.displayName} popped from heap")
-            chatService.sendSystemMessage(output.toString())
-            
-            def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
-            output.append("[${timeStr}] ${TerminalFormatter.formatText('[SYSTEM]', 'bold', 'red')}")
-            broadcastToMingleUsers(output.toString())
-            output.append("\r\n")
-            output.append(TerminalFormatter.formatText("Null pointer new memory address. Returned to working ram", 'bold', 'green'))
-            output.append("\r\n")
-
-            return  output.toString()
-        }
-        
-        if (trimmedCommand.toLowerCase().startsWith('echo ')) {
-            def message = chatService.processEchoCommand(trimmedCommand)
-            if (message) {
-                def result = chatService.sendMessage(player, message)
-                if (result.success) {
-                    // Show immediate feedback with the new message in IRC style
-                    def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
-                    output.append("[${timeStr}] ${TerminalFormatter.formatText(player.displayName, 'bold', 'white')}: ${message}")
-                    output.append("\r\n")
-
-                    // Broadcast to all mingle users immediately
-                    broadcastToMingleUsers(output.toString())
-
-                    return
-                } else {
-                    output.append(TerminalFormatter.formatText("Error: ${result.error}", 'bold', 'red'))
-                    return output.toString()
-                }
-            } else {
-                output.append(TerminalFormatter.formatText("Invalid echo format. Use: echo <message>", 'bold', 'red'))
-                return output.toString()
-            }
-        }
-        if (trimmedCommand.toLowerCase().startsWith('pay')) {
-            if (trimmedCommand.toLowerCase() == 'pay') {
-                return TerminalFormatter.formatText("Usage: pay <entity_name> <bits>", 'bold', 'yellow')
-            }
-            return handlePayCommand(trimmedCommand, player, writer)
-        }
-        
-        if (trimmedCommand.toLowerCase().startsWith('pm')) {
-            if (trimmedCommand.toLowerCase() == 'pm') {
-                return TerminalFormatter.formatText("Usage: pm <entity_name> <message>", 'bold', 'yellow')
-            }
-            return handlePrivateMessageCommand(trimmedCommand, player, writer)
-        }
-        
-        if (trimmedCommand.toLowerCase().startsWith('trade')) {
-            if (trimmedCommand.toLowerCase() == 'trade') {
-                return TerminalFormatter.formatText("Usage: trade <entity_name>", 'bold', 'yellow')
-            }
-            return handleTradeCommand(trimmedCommand, player, writer)
-        }
-        
-        if (trimmedCommand.equalsIgnoreCase('list') || trimmedCommand.equalsIgnoreCase('who')) {
-            return listMingleUsers(player)
-        }
-        
-        if (trimmedCommand.equalsIgnoreCase('help')) {
-            return PlayerHelp.chat('help')
-        }
-        
-        // For pressing enter or unknown commands, just give simple feedback
-        if (trimmedCommand.isEmpty()) {
-            return TerminalFormatter.formatText("Heap commands: echo <msg> | pay <entity> <bits> | pm <entity> <msg> | trade <entity> | list | help | exit", 'italic', 'cyan')
-        } else {
-            return TerminalFormatter.formatText("Unknown command '${trimmedCommand}'. Type 'help' for heap commands.", 'italic', 'yellow')
-        }
-    }
-    
     private String handleDefragEncounter(String command, LambdaPlayer player, PrintWriter writer) {
         def defragBot = activeDefragSessions[writer]
         if (!defragBot) {
@@ -1542,250 +1369,12 @@ class TelnetServerService {
         }
     }
     
-    private void sendToMingleUsers(String message) {
-        playerSessions.each { writer, player ->
-            if (player.isInMingle) {
-                writer.println(message)
-            }
-        }
-    }
 
     // TODO: Fix to use outputHandler
-    private void broadcastToMingleUsers(String message) {
-        playerSessions.each { writer, player ->
-            // Check current mingle status from database
-            LambdaPlayer.withTransaction {
-                def currentPlayer = LambdaPlayer.get(player.id)
-                if (currentPlayer?.isInMingle) {
-                    writer.println(message)
-                    writer.flush()
-                }
-            }
-        }
-    }
-    
-    private String handlePayCommand(String command, LambdaPlayer player, PrintWriter writer) {
-        def parts = command.trim().split(' ')
-        if (parts.length < 3) {
-            return TerminalFormatter.formatText("Usage: pay <entity_name> <bits>", 'bold', 'red')
-        }
-        
-        def targetName = parts[1]
-        def bitsAmount = 0
-        try {
-            bitsAmount = Integer.parseInt(parts[2])
-        } catch (NumberFormatException e) {
-            return TerminalFormatter.formatText("Invalid bit amount: ${parts[2]}", 'bold', 'red')
-        }
-        
-        if (bitsAmount <= 0) {
-            return TerminalFormatter.formatText("Bit amount must be positive", 'bold', 'red')
-        }
-        
-        // Find target player in mingle
-        def targetPlayer = findMingleUser(targetName)
-        if (!targetPlayer) {
-            return TerminalFormatter.formatText("Entity '${targetName}' not found in heap", 'bold', 'red')
-        }
-        
-        if (targetPlayer.id == player.id) {
-            return TerminalFormatter.formatText("Cannot pay yourself", 'bold', 'red')
-        }
-        
-        // Check if sender has enough bits
-        def currentBits = 0
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            currentBits = managedPlayer.bits
-        }
-        
-        if (currentBits < bitsAmount) {
-            return TerminalFormatter.formatText("Insufficient bits. You have: ${currentBits}", 'bold', 'red')
-        }
-        
-        // Transfer bits
-        LambdaPlayer.withTransaction {
-            def sender = LambdaPlayer.get(player.id)
-            def receiver = LambdaPlayer.get(targetPlayer.id)
-            
-            if (sender && receiver) {
-                sender.bits -= bitsAmount
-                receiver.bits += bitsAmount
-                sender.save(failOnError: true)
-                receiver.save(failOnError: true)
-            }
-        }
-        
-        // Notify both parties
-        def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
-        def systemMsg = "${TerminalFormatter.formatText('[PAYMENT]', 'bold', 'green')} ${player.displayName} sent ${bitsAmount} bits to ${targetName}"
-        broadcastToMingleUsers("[${timeStr}] ${systemMsg}")
-        
-        return TerminalFormatter.formatText("Sent ${bitsAmount} bits to ${targetName}", 'bold', 'green')
-    }
-    
-    private String handlePrivateMessageCommand(String command, LambdaPlayer player, PrintWriter writer) {
-        def parts = command.trim().split(' ', 3)
-        if (parts.length < 3) {
-            return TerminalFormatter.formatText("Usage: pm <entity_name> <message>", 'bold', 'red')
-        }
-        
-        def targetName = parts[1]
-        def message = parts[2]
-        
-        def targetPlayer = findMingleUser(targetName)
-        if (!targetPlayer) {
-            return TerminalFormatter.formatText("Entity '${targetName}' not found in heap", 'bold', 'red')
-        }
-        
-        if (targetPlayer.id == player.id) {
-            return TerminalFormatter.formatText("Cannot PM yourself", 'bold', 'red')
-        }
-        
-        // Send private message to target
-        def targetWriter = findWriterForPlayer(targetPlayer)
-        if (targetWriter) {
-            def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
-            def pmMessage = "[${timeStr}] ${TerminalFormatter.formatText('[PM]', 'bold', 'magenta')} ${TerminalFormatter.formatText(player.displayName, 'bold', 'white')}: ${message}"
-            targetWriter.println(pmMessage)
-            targetWriter.flush()
-        }
-        
-        return TerminalFormatter.formatText("Private message sent to ${targetName}", 'italic', 'green')
-    }
-    
-    private String handleTradeCommand(String command, LambdaPlayer player, PrintWriter writer) {
-        def parts = command.trim().split(' ')
-        if (parts.length < 2) {
-            return TerminalFormatter.formatText("Usage: trade <entity_name>", 'bold', 'red')
-        }
-        
-        def targetName = parts[1]
-        def targetPlayer = findMingleUser(targetName)
-        if (!targetPlayer) {
-            return TerminalFormatter.formatText("Entity '${targetName}' not found in heap", 'bold', 'red')
-        }
-        
-        if (targetPlayer.id == player.id) {
-            return TerminalFormatter.formatText("Cannot trade with yourself", 'bold', 'red')
-        }
-        
-        // Enhanced trade menu with puzzle knowledge
-        def tradeMenu = new StringBuilder()
-        tradeMenu.append(TerminalFormatter.formatText("=== ENHANCED TRADE INTERFACE ===", 'bold', 'cyan')).append('\n')
-        tradeMenu.append("Target Entity: ${TerminalFormatter.formatText(targetName, 'bold', 'yellow')}\n\n")
-        
-        // STANDARD LOGIC FRAGMENTS
-        tradeMenu.append(TerminalFormatter.formatText("📚 STANDARD LOGIC FRAGMENTS:", 'bold', 'green')).append('\n')
-        def playerFragments = []
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (managedPlayer?.logicFragments) {
-                playerFragments = managedPlayer.logicFragments.collect { it }
-            }
-        }
-        
-        if (playerFragments) {
-            playerFragments.eachWithIndex { fragment, index ->
-                tradeMenu.append("F${index + 1}. ${fragment.name} x${fragment.quantity} (Power: ${fragment.powerLevel}/10) - ~${20 + fragment.powerLevel * 5} bits\n")
-            }
-        } else {
-            tradeMenu.append("No standard fragments to trade\n")
-        }
-        
-        // PUZZLE KNOWLEDGE
-        def tradeableKnowledge = puzzleKnowledgeTradingService.getTradeablePuzzleKnowledge(player)
-        
-        tradeMenu.append("\n${TerminalFormatter.formatText('🧩 PUZZLE KNOWLEDGE:', 'bold', 'purple')}\n")
-        
-        // Puzzle Fragments
-        if (tradeableKnowledge.puzzleFragments.size() > 0) {
-            tradeMenu.append("Executable Puzzle Fragments:\n")
-            tradeableKnowledge.puzzleFragments.eachWithIndex { item, index ->
-                tradeMenu.append("PF${index + 1}. ${item.name} (${item.elementHint}) - ${item.tradeValue} bits\n")
-            }
-        }
-        
-        // Variables
-        if (tradeableKnowledge.variables.size() > 0) {
-            tradeMenu.append("Collected Variables:\n")
-            tradeableKnowledge.variables.eachWithIndex { item, index ->
-                tradeMenu.append("V${index + 1}. ${item.name} (${item.elementHint}) - ${item.tradeValue} bits\n")
-            }
-        }
-        
-        // Nonces (only tradeable ones)
-        def tradeableNonces = tradeableKnowledge.nonces.findAll { it.canTrade }
-        if (tradeableNonces.size() > 0) {
-            tradeMenu.append("Elemental Nonces:\n")
-            tradeableNonces.eachWithIndex { item, index ->
-                tradeMenu.append("N${index + 1}. ${item.name} (${item.elementType}) - ${item.tradeValue} bits\n")
-                tradeMenu.append("     Digital Spec: ${item.chemicalClue} | Flag: ${item.commandFlag}\n")
-            }
-        }
-        
-        // Complete Solutions
-        if (tradeableKnowledge.completedSolutions.size() > 0) {
-            tradeMenu.append("Complete Solutions:\n")
-            tradeableKnowledge.completedSolutions.eachWithIndex { item, index ->
-                tradeMenu.append("S${index + 1}. ${item.description} - ${item.tradeValue} bits\n")
-                tradeMenu.append("     ${item.includes}\n")
-            }
-        }
-        
-        if (tradeableKnowledge.puzzleFragments.size() == 0 && 
-            tradeableKnowledge.variables.size() == 0 && 
-            tradeableNonces.size() == 0 && 
-            tradeableKnowledge.completedSolutions.size() == 0) {
-            tradeMenu.append("No puzzle knowledge available for trade\n")
-        }
-        
-        tradeMenu.append("\n${TerminalFormatter.formatText('💰 TRADING COMMANDS:', 'bold', 'yellow')}\n")
-        tradeMenu.append("Standard Fragments: offer F<num> <quantity> <price>\n")
-        tradeMenu.append("Puzzle Fragments: offer PF<num> <price>\n")
-        tradeMenu.append("Variables: offer V<num> <price>\n")
-        tradeMenu.append("Nonces: offer N<num> <price>\n")
-        tradeMenu.append("Complete Solutions: offer S<num> <price>\n")
-        tradeMenu.append("cancel - Cancel trade\n")
-        
-        return tradeMenu.toString()
-    }
-    
-    private String listMingleUsers(LambdaPlayer player) {
-        def userList = new StringBuilder()
-        userList.append(TerminalFormatter.formatText("=== HEAP LIST ===", 'bold', 'cyan')).append('\n')
-        
-        def mingleUsers = []
-        LambdaPlayer.withTransaction {
-            mingleUsers = LambdaPlayer.findAllByIsInMingle(true)
-        }
-        
-        if (mingleUsers) {
-            mingleUsers.each { user ->
-                def marker = (user.id == player.id) ? " (you)" : ""
-                userList.append("• ${user.displayName}${marker} [Level ${user.currentMatrixLevel}]\n")
-            }
-        } else {
-            userList.append("Alone in heap..\n")
-        }
-        
-        return userList.toString()
-    }
 
-    private LambdaPlayer findMingleUser(String name) {
-        def foundPlayer = null
-        LambdaPlayer.withTransaction {
-            foundPlayer = LambdaPlayer.findByDisplayNameAndIsInMingle(name, true)
-        }
-        return foundPlayer
-    }
 
-    private PrintWriter findWriterForPlayer(LambdaPlayer target) {
-        return playerSessions.find { writer, player ->
-            player.id == target.id
-        }?.key
-    }
-    
+
+
     private String handleRepairCommand(String command, LambdaPlayer player) {
         def parts = command.trim().split(' ')
         

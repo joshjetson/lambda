@@ -487,4 +487,66 @@ class LambdaPlayerService {
 
         return status.toString()
     }
+
+    String showInventory(LambdaPlayer player) {
+        def inventory = new StringBuilder()
+
+        LambdaPlayer.withTransaction {
+            def managedPlayer = LambdaPlayer.get(player.id)
+            if (managedPlayer) {
+                inventory.append(TerminalFormatter.formatText("=== LAMBDA INVENTORY ===", 'bold', 'cyan')).append('\r\n')
+                inventory.append("Bits: ${TerminalFormatter.formatText(managedPlayer.bits.toString(), 'bold', 'green')}\r\n\r\n")
+
+                inventory.append("Logic Fragments:\r\n")
+                def validFragments = managedPlayer.logicFragments?.findAll { it != null }
+                if (validFragments?.size() > 0) {
+                    validFragments.each { fragment ->
+                        if (fragment?.name) {
+                            inventory.append("  • ${fragment.name} (${fragment.fragmentType}) - Level ${fragment.powerLevel}\r\n")
+                        }
+                    }
+                } else {
+                    inventory.append("  No logic fragments acquired\r\n")
+                }
+
+                inventory.append("\r\nSpecial Items:\r\n")
+                def validItems = managedPlayer.specialItems?.findAll { it != null }
+                if (validItems?.size() > 0) {
+                    validItems.each { item ->
+                        if (item?.name) {
+                            def usesText = item.isPermanent ? "[PERMANENT]" : "[${item.usesRemaining}/${item.maxUses} uses]"
+                            def activeText = item.isActive ? " [ACTIVE]" : ""
+                            inventory.append("  • ${item.name} ${usesText}${activeText}\r\n")
+                            inventory.append("    ${item.description}\r\n")
+                            if (item.expiresAt && item.isActive) {
+                                def now = new Date()
+                                def timeLeft = ((item.expiresAt.time - now.time) / 1000).toInteger()
+                                if (timeLeft > 0) {
+                                    inventory.append("    Expires in: ${timeLeft} seconds\r\n")
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    inventory.append("  No special items acquired\r\n")
+                }
+
+                inventory.append("\r\nSkills:\r\n")
+                def validSkills = managedPlayer.skills?.findAll { it != null }
+                if (validSkills?.size() > 0) {
+                    validSkills.each { skill ->
+                        if (skill?.skillName) {
+                            inventory.append("  • ${skill.skillName} - Level ${skill.level} (${skill.experience} XP)\r\n")
+                        }
+                    }
+                } else {
+                    inventory.append("  No skills acquired\r\n")
+                }
+            } else {
+                inventory.append("Error: Player not found\r\n")
+            }
+        }
+
+        return inventory.toString()
+    }
 }
