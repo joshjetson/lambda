@@ -110,35 +110,35 @@ class DefragBot {
         
         // Add base system info
         baseContent.each { line ->
-            content.append("${line}\n")
+            content.append("${line}\r\n")
         }
         
         // Add PID based on difficulty
         if (difficulty <= 3) {
             // Easy: PID clearly visible
-            content.append("defrag_process_id: ${processId}\n")
+            content.append("defrag_process_id: ${processId}\r\n")
         } else if (difficulty <= 6) {
             // Medium: PID mixed with other numbers but in a specific pattern
-            content.append("active_processes: [1234, 5678, 9012]\n")
-            content.append("defrag_process_id: ${processId}\n")
-            content.append("background_processes: [2345, 6789, 3456]\n")
+            content.append("active_processes: [1234, 5678, 9012]\r\n")
+            content.append("defrag_process_id: ${processId}\r\n")
+            content.append("background_processes: [2345, 6789, 3456]\r\n")
         } else {
             // Hard: PID buried in complex data requiring precise regex
-            content.append("process_groups: {\n")
-            content.append("  \"system_processes\": [1111, 2222, 3333],\n")
-            content.append("  \"defrag_processes\": [${processId}],\n")
-            content.append("  \"cleanup_processes\": [4444, 5555, 6666]\n")
-            content.append("}\n")
-            content.append("process_metadata: {\n")
-            content.append("  \"${processId}\": {\"type\": \"defrag\", \"status\": \"active\"},\n")
-            content.append("  \"1111\": {\"type\": \"system\", \"status\": \"idle\"}\n")
-            content.append("}\n")
+            content.append("process_groups: {\r\n")
+            content.append("  \"system_processes\": [1111, 2222, 3333],\r\n")
+            content.append("  \"defrag_processes\": [${processId}],\r\n")
+            content.append("  \"cleanup_processes\": [4444, 5555, 6666]\r\n")
+            content.append("}\r\n")
+            content.append("process_metadata: {\r\n")
+            content.append("  \"${processId}\": {\"type\": \"defrag\", \"status\": \"active\"},\r\n")
+            content.append("  \"1111\": {\"type\": \"system\", \"status\": \"idle\"}\r\n")
+            content.append("}\r\n")
         }
         
         // Add minimal noise to keep focus on the PID
         def noiseLines = Math.min(difficulty, 3)
         (1..noiseLines).each { i ->
-            content.append("log_entry_${i}: routine_scan_${i}${i}${i}${i}\n")
+            content.append("log_entry_${i}: routine_scan_${i}${i}${i}${i}\r\n")
         }
         
         return content.toString()
@@ -148,42 +148,11 @@ class DefragBot {
         def difficulty = Math.max(1, Math.min(10, difficultyLevel))
         
         if (difficulty <= 3) {
-            return """
-Defrag Bot File System Access (Difficulty: ${difficulty}/10):
-Use 'cat /proc/defrag/${botId}' to view process file
-Use 'grep' with regex patterns to find the PID
-
-Example commands:
-  t
-  grep -o 'defrag_process_id: [0-9]*' /proc/defrag/${botId}
-  grep -o '[0-9][0-9][0-9][0-9]' /proc/defrag/${botId}
-
-The PID must be extracted alone on its own line.
-"""
+            return """Defrag Bot File System Access (Difficulty: ${difficulty}/10):\r\nUse 'cat /proc/defrag/${botId}' to view process file\r\nUse 'grep' with regex patterns to find the PID\r\n\r\nExample commands:\r\n  grep -o 'defrag_process_id: [0-9]*' /proc/defrag/${botId}\r\n  grep -o '[0-9][0-9][0-9][0-9]' /proc/defrag/${botId}\r\n\r\nThe PID must be extracted alone on its own line."""
         } else if (difficulty <= 6) {
-            return """
-Defrag Bot File System Access (Difficulty: ${difficulty}/10):
-Use 'cat /proc/defrag/${botId}' to view process file
-Use 'grep' with regex patterns to find the PID
-
-Example commands:
-  grep -o 'defrag_process_id: [0-9]*' /proc/defrag/${botId}
-  grep -o ': [0-9]*' /proc/defrag/${botId} | grep -o '[0-9]*'
-
-The PID must be extracted alone on its own line.
-"""
+            return """Defrag Bot File System Access (Difficulty: ${difficulty}/10):\r\nUse 'cat /proc/defrag/${botId}' to view process file\r\nUse 'grep' with regex patterns to find the PID\r\n\r\nExample commands:\r\n  grep -o 'defrag_process_id: [0-9]*' /proc/defrag/${botId}\r\n  grep -o ': [0-9]*' /proc/defrag/${botId} | grep -o '[0-9]*'\r\n\r\nThe PID must be extracted alone on its own line."""
         } else {
-            return """
-Defrag Bot File System Access (Difficulty: ${difficulty}/10):
-Use 'cat /proc/defrag/${botId}' to view process file
-Use 'grep' with advanced regex to find the PID
-
-Example commands:
-  grep -o 'defrag_processes.*\\[[0-9]*\\]' /proc/defrag/${botId}
-  grep -o '\\[[0-9]*\\]' /proc/defrag/${botId} | grep -o '[0-9]*'
-
-The PID must be extracted alone on its own line.
-"""
+            return """Defrag Bot File System Access (Difficulty: ${difficulty}/10):\r\nUse 'cat /proc/defrag/${botId}' to view process file\r\nUse 'grep' with advanced regex to find the PID\r\n\r\nExample commands:\r\n  grep -o 'defrag_processes.*\\[[0-9]*\\]' /proc/defrag/${botId}\r\n  grep -o '\\[[0-9]*\\]' /proc/defrag/${botId} | grep -o '[0-9]*'\r\n\r\nThe PID must be extracted alone on its own line."""
         }
     }
 }

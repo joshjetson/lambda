@@ -385,7 +385,7 @@ class CoordinateStateService {
                 encounter.append(TerminalFormatter.formatText("⚠️  DEFRAG BOT ENCOUNTERED!", 'bold', 'red')).append('\r\n')
                 encounter.append(TerminalFormatter.formatText("System defragmentation process ${defragBot.botId} detected", 'italic', 'yellow')).append('\r\n')
                 encounter.append(TerminalFormatter.formatText("Time limit: ${defragBot.timeLimit} seconds", 'bold', 'red')).append('\r\n')
-                encounter.append("Type 'defrag -h' to analyze the defrag process or face system buffer clearing!")
+                encounter.append("Type 'defrag -h' to analyze the defrag process or face system buffer clearing!\r\n")
 
                 return encounter.toString()
             }

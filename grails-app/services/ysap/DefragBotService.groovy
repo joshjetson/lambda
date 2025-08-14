@@ -1,11 +1,16 @@
 package ysap
 
 import grails.gorm.transactions.Transactional
+import ysap.TerminalFormatter
 
 @Transactional
 class DefragBotService {
     
     def coordinateStateService
+    def audioService
+    def lambdaPlayerService
+    def specialItemService
+    def puzzleService
 
     def spawnDefragBot(Integer matrixLevel, Integer sector, Integer positionX, Integer positionY) {
         // Don't spawn defrag bots in early safe zones or chat areas
@@ -129,7 +134,7 @@ class DefragBotService {
             } else {
                 def pidResult = [:]
                 pidResult.success = false
-                pidResult.output = "PID not acquired. Use grep with proper regex to find the PID first."
+                pidResult.output = "PID not acquired. Use grep with proper regex to find the PID first.\r\n"
                 pidResult.action = "failed"
                 return pidResult
             }
@@ -137,7 +142,7 @@ class DefragBotService {
         
         // Invalid command - bot gets stronger or player takes damage
         result.success = false
-        result.output = "Invalid command. Defrag process continues..."
+        result.output = "Invalid command. Defrag process continues...\r\n"
         result.action = "failed"
         
         return result
@@ -660,5 +665,245 @@ class DefragBotService {
         }
         
         return spawnedCount
+    }
+
+    def handleDefragCommandFromTelnet(String command, LambdaPlayer player, PrintWriter writer) {
+        // Check if there's a defrag bot at the player's current position
+        def defragBot = null
+        DefragBot.withTransaction {
+            defragBot = DefragBot.findByMatrixLevelAndPositionXAndPositionY(
+                player.currentMatrixLevel, player.positionX, player.positionY
+            )
+        }
+        
+        if (!defragBot) {
+            return TerminalFormatter.formatText("No defrag bot present at current coordinates (${player.positionX},${player.positionY})\r\n", 'italic', 'yellow')
+        }
+        
+        // If there is a defrag bot, start an encounter
+        // Note: activeDefragSessions needs to be managed by caller
+        
+        def parts = command.trim().toLowerCase().split(' ')
+        if (parts.length > 1 && parts[1] == '-h') {
+            // Handle defrag -h help command
+            def result = handleDefragCommand(defragBot, command, player)
+            if (result.action == 'help') {
+                def helpDisplay = new StringBuilder()
+                helpDisplay.append(TerminalFormatter.formatText("⚠️  DEFRAG PROCESS ANALYSIS", 'bold', 'red')).append('\r\n')
+                helpDisplay.append(result.output.replace('\\n', '\r\n')).append('\r\n')
+                helpDisplay.append(TerminalFormatter.formatText("Find the kill command to terminate this process!", 'italic', 'yellow'))
+                return helpDisplay.toString()
+            }
+        }
+        
+        // Regular defrag command without -h
+        def encounter = new StringBuilder()
+        encounter.append(TerminalFormatter.formatText("⚠️  DEFRAG BOT ENCOUNTERED!", 'bold', 'red')).append('\r\n')
+        encounter.append(TerminalFormatter.formatText("System defragmentation process ${defragBot.botId} detected at (${player.positionX},${player.positionY})", 'italic', 'yellow')).append('\r\n')
+        encounter.append(TerminalFormatter.formatText("Difficulty Level: ${defragBot.difficultyLevel}/10", 'bold', 'yellow')).append('\r\n')
+        encounter.append(TerminalFormatter.formatText("Time limit: ${defragBot.timeLimit} seconds", 'bold', 'red')).append('\r\n')
+        encounter.append(TerminalFormatter.formatText("⚠️  BITS DRAINING: -5 bits every 5 seconds!", 'bold', 'red')).append('\r\n')
+        encounter.append("Type 'defrag -h' to learn how to find and terminate the process!\r\n")
+        
+        return encounter.toString()
+    }
+
+    def handleDefragEncounter(String command, LambdaPlayer player, PrintWriter writer, DefragBot defragBot) {
+        if (!defragBot) {
+            return "No active defrag encounter found."
+        }
+        
+        def result = handleDefragCommand(defragBot, command, player)
+        
+        if (result.success) {
+            // Player defeated the defrag bot
+            audioService.playSound("defrag_victory")
+            
+            def response = new StringBuilder()
+            response.append(TerminalFormatter.formatText("✅ DEFRAG BOT TERMINATED!", 'bold', 'green')).append('\r\n')
+            response.append(result.output).append('\r\n')
+            
+            // Apply rewards
+            if (result.rewards.bits) {
+                lambdaPlayerService.addBits(player, result.rewards.bits)
+                audioService.playSound("bits_earned")
+                response.append(TerminalFormatter.formatText("Earned ${result.rewards.bits} bits!", 'bold', 'yellow')).append('\r\n')
+                
+                // Update session player object with new bits
+                LambdaPlayer.withTransaction {
+                    def updatedPlayer = LambdaPlayer.get(player.id)
+                    if (updatedPlayer) {
+                        player.bits = updatedPlayer.bits
+                    }
+                }
+            }
+            
+            if (result.rewards.stolenFragment) {
+                // Return stolen fragment to player
+                def fragment = result.rewards.stolenFragment
+                response.append(TerminalFormatter.formatText("Recovered stolen logic fragment: ${fragment.name}!", 'bold', 'cyan')).append('\r\n')
+            }
+            
+            if (result.rewards.specialItem) {
+                try {
+                    println "DEBUG DefragBotService: Creating special item '${result.rewards.specialItem}' for player ${player.displayName} (ID: ${player.id})"
+                    def item = specialItemService.createSpecialItem(player, result.rewards.specialItem)
+                    audioService.playSound("item_found")
+                    if (item) {
+                        println "DEBUG DefragBotService: Item creation SUCCESS - ${item.name} (ID: ${item.id})"
+                        response.append(TerminalFormatter.formatText("Found special item: ${item.name}!", 'bold', 'magenta')).append('\r\n')
+                        response.append(TerminalFormatter.formatText("${item.description}", 'italic', 'white')).append('\r\n')
+                    } else {
+                        println "DEBUG DefragBotService: Item creation FAILED - createSpecialItem returned null"
+                        response.append(TerminalFormatter.formatText("Found special item: ${result.rewards.specialItem}!", 'bold', 'magenta')).append('\r\n')
+                        response.append(TerminalFormatter.formatText("⚠️ Item creation failed - please contact admin", 'italic', 'red')).append('\r\n')
+                    }
+                } catch (Exception e) {
+                    println "DEBUG DefragBotService: Exception during item creation: ${e.class.simpleName}: ${e.message}"
+                    e.printStackTrace()
+                    response.append(TerminalFormatter.formatText("Found special item: ${result.rewards.specialItem}!", 'bold', 'magenta')).append('\r\n')
+                    response.append(TerminalFormatter.formatText("⚠️ Item creation error - ${e.message}", 'italic', 'red')).append('\r\n')
+                }
+            }
+            
+            if (result.rewards.puzzleFragment) {
+                try {
+                    def puzzleResult = puzzleService.awardPuzzleFragment(player, result.rewards.puzzleFragment)
+                    if (puzzleResult.success) {
+                        audioService.playSound("fragment_pickup")
+                        response.append(TerminalFormatter.formatText("${puzzleResult.message}!", 'bold', 'purple')).append('\r\n')
+                        response.append(TerminalFormatter.formatText("Executable logic fragment acquired - use 'pinv' to view!", 'italic', 'white')).append('\r\n')
+                    } else {
+                        response.append(TerminalFormatter.formatText("Puzzle fragment found: ${result.rewards.puzzleFragment}!", 'bold', 'purple')).append('\r\n')
+                        response.append(TerminalFormatter.formatText("⚠️ ${puzzleResult.message}", 'italic', 'red')).append('\r\n')
+                    }
+                } catch (Exception e) {
+                    println "DEBUG DefragBotService: Exception during puzzle fragment award: ${e.message}"
+                    response.append(TerminalFormatter.formatText("Puzzle fragment found: ${result.rewards.puzzleFragment}!", 'bold', 'purple')).append('\r\n')
+                }
+            }
+            
+            if (result.rewards.elementalNonce) {
+                try {
+                    def nonceResult = puzzleService.awardNonce(player, result.rewards.elementalNonce)
+                    if (nonceResult.success) {
+                        audioService.playSound("item_found")
+                        response.append(TerminalFormatter.formatText("${nonceResult.message}!", 'bold', 'magenta')).append('\r\n')
+                        response.append(TerminalFormatter.formatText("${nonceResult.nonce?.getChemicalHint() ?: 'Chemical signature detected!'}", 'italic', 'yellow')).append('\r\n')
+                        response.append(TerminalFormatter.formatText("Use 'pinv' to view your nonce collection!", 'italic', 'white')).append('\r\n')
+                    } else {
+                        response.append(TerminalFormatter.formatText("Elemental nonce discovered: ${result.rewards.elementalNonce}!", 'bold', 'magenta')).append('\r\n')
+                        response.append(TerminalFormatter.formatText("⚠️ ${nonceResult.message}", 'italic', 'red')).append('\r\n')
+                    }
+                } catch (Exception e) {
+                    println "DEBUG DefragBotService: Exception during nonce award: ${e.message}"
+                    response.append(TerminalFormatter.formatText("Elemental nonce discovered: ${result.rewards.elementalNonce}!", 'bold', 'magenta')).append('\r\n')
+                }
+            }
+            
+            if (result.rewards.logicFragment) {
+                // Add logic fragment to player inventory
+                def fragmentType = result.rewards.logicFragment
+                def fragmentData = createLogicFragmentFromType(fragmentType, player)
+                if (fragmentData) {
+                    response.append(TerminalFormatter.formatText("Discovered logic fragment: ${fragmentData.name}!", 'bold', 'cyan')).append('\r\n')
+                } else {
+                    response.append(TerminalFormatter.formatText("Discovered logic fragment: ${result.rewards.logicFragment}!", 'bold', 'cyan')).append('\r\n')
+                }
+            }
+            
+            return response.toString()
+            
+        } else if (result.action == 'help') {
+            // Show defrag help with file system instructions
+            def helpDisplay = new StringBuilder()
+            helpDisplay.append(TerminalFormatter.formatText("⚠️  DEFRAG PROCESS ANALYSIS", 'bold', 'red')).append('\r\n')
+            helpDisplay.append(result.output.replace('\\n', '\r\n')).append('\r\n')
+            return helpDisplay.toString()
+            
+        } else if (result.action == 'file_view') {
+            // Show file content for cat command
+            def fileDisplay = new StringBuilder()
+            fileDisplay.append(TerminalFormatter.formatText("=== /proc/defrag/${defragBot.botId} ===", 'bold', 'cyan')).append('\r\n')
+            fileDisplay.append(result.output).append('\r\n')
+            return fileDisplay.toString()
+            
+        } else if (result.action == 'grep') {
+            // Show grep output
+            def grepDisplay = new StringBuilder()
+            if (result.pidAcquired) {
+                grepDisplay.append(TerminalFormatter.formatText(result.output, 'bold', 'green')).append('\r\n')
+                grepDisplay.append(TerminalFormatter.formatText("Use 'kill -9 ${defragBot.processId}' to terminate process!\r\n", 'italic', 'yellow'))
+            } else {
+                grepDisplay.append(TerminalFormatter.formatText("Grep output:", 'bold', 'cyan')).append('\r\n')
+                grepDisplay.append(result.output).append('\r\n')
+                grepDisplay.append(TerminalFormatter.formatText("Refine your regex to isolate the PID on its own line.\r\n", 'italic', 'yellow'))
+            }
+            return grepDisplay.toString()
+            
+        } else {
+            // Invalid command, timeout, or bit drain
+            def errorDisplay = new StringBuilder()
+            errorDisplay.append(TerminalFormatter.formatText("⚠️  ${result.output}\r\n", 'bold', 'red'))
+            
+            // Check if player got defragged
+            LambdaPlayer.withTransaction {
+                def refreshedPlayer = LambdaPlayer.get(player.id)
+                if (refreshedPlayer && refreshedPlayer.bits <= 0) {
+                    errorDisplay.append('\r\n').append(TerminalFormatter.formatText("💀 DEFRAGGED! Respawning at (0,0) with 10 bits...\r\n", 'bold', 'red'))
+                    if (refreshedPlayer.logicFragments?.size() < player.logicFragments?.size()) {
+                        errorDisplay.append('\r\n').append(TerminalFormatter.formatText("Logic fragment stolen by defrag bot!\r\n", 'bold', 'red'))
+                    }
+                }
+            }
+            
+            return errorDisplay.toString()
+        }
+    }
+
+    private def createLogicFragmentFromType(String fragmentType, LambdaPlayer player) {
+        def fragmentDefinitions = [
+                'CONDITIONAL': [name: 'Advanced Conditional', description: 'Enhanced if-else logic with nested conditions', powerLevel: 4],
+                'LOOP': [name: 'Advanced Loop', description: 'Optimized iteration with break/continue support', powerLevel: 5],
+                'FUNCTION': [name: 'Advanced Function', description: 'Higher-order functions with lambda support', powerLevel: 6],
+                'CLASS': [name: 'Advanced Class', description: 'Inheritance and polymorphism capabilities', powerLevel: 8],
+                'EXCEPTION_HANDLING': [name: 'Advanced Exception', description: 'Custom exceptions and error handling', powerLevel: 7]
+        ]
+
+        def fragmentData = fragmentDefinitions[fragmentType]
+        if (!fragmentData) return null
+
+        // Create the logic fragment and add it to player inventory
+        def existingFragment = player.logicFragments?.find { 
+            it.name == fragmentData.name && it.fragmentType == fragmentType 
+        }
+        
+        if (existingFragment) {
+            // Increment quantity instead of creating duplicate
+            existingFragment.quantity = (existingFragment.quantity ?: 1) + 1
+            existingFragment.save(failOnError: true)
+            return fragmentData
+        } else {
+            def newFragment = new LogicFragment(
+                name: fragmentData.name,
+                description: fragmentData.description,
+                fragmentType: fragmentType,
+                powerLevel: fragmentData.powerLevel,
+                pythonCode: "# ${fragmentData.name}\n# Power Level: ${fragmentData.powerLevel}\nprint('${fragmentData.name} executed')",
+                quantity: 1,
+                pickedUpDate: new Date()
+            )
+            
+            LambdaPlayer.withTransaction {
+                def managedPlayer = LambdaPlayer.get(player.id)
+                if (managedPlayer) {
+                    managedPlayer.addToLogicFragments(newFragment)
+                    newFragment.save(failOnError: true)
+                    managedPlayer.save(failOnError: true)
+                }
+            }
+            
+            return fragmentData
+        }
     }
 }

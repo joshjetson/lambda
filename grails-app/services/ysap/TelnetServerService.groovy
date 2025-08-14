@@ -458,7 +458,13 @@ class TelnetServerService {
         
         // Check if player is in an active defrag encounter
         if (activeDefragSessions.containsKey(writer)) {
-            return handleDefragEncounter(command, player, writer)
+            def defragBot = activeDefragSessions[writer]
+            def result = defragBotService.handleDefragEncounter(command, player, writer, defragBot)
+            // If encounter is completed, remove from active sessions
+            if (defragBot && !defragBot.isActive) {
+                activeDefragSessions.remove(writer)
+            }
+            return result
         }
         
         // Refresh player state and check if player is in mingle mode
@@ -493,7 +499,18 @@ class TelnetServerService {
             case 'heap':
                 return chatService.enterChat(player, writer)
             case 'defrag':
-                return handleDefragCommand(command, player, writer)
+                def result = defragBotService.handleDefragCommandFromTelnet(command, player, writer)
+                // Also need to track the encounter in the activeDefragSessions
+                def defragBot = null
+                DefragBot.withTransaction {
+                    defragBot = DefragBot.findByMatrixLevelAndPositionXAndPositionY(
+                        player.currentMatrixLevel, player.positionX, player.positionY
+                    )
+                }
+                if (defragBot) {
+                    activeDefragSessions[writer] = defragBot
+                }
+                return result
             case 'cat':
                 return handleCatCommand(command, player)
             case 'pickup':
@@ -622,40 +639,6 @@ class TelnetServerService {
         return usage.toString()
     }
 
-    private def createLogicFragmentFromType(String fragmentType, LambdaPlayer player) {
-        def fragmentDefinitions = [
-                'CONDITIONAL': [name: 'Advanced Conditional', description: 'Enhanced if-else logic with nested conditions', powerLevel: 4],
-                'LOOP': [name: 'Advanced Loop', description: 'Optimized iteration with break/continue support', powerLevel: 5],
-                'FUNCTION': [name: 'Advanced Function', description: 'Higher-order functions with lambda support', powerLevel: 6],
-                'CLASS': [name: 'Advanced Class', description: 'Inheritance and polymorphism capabilities', powerLevel: 8],
-                'EXCEPTION_HANDLING': [name: 'Advanced Exception', description: 'Custom exceptions and error handling', powerLevel: 7]
-        ]
-
-        def fragmentData = fragmentDefinitions[fragmentType]
-        if (!fragmentData) return null
-
-        return LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (managedPlayer) {
-                def newFragment = new LogicFragment(
-                        name: fragmentData.name,
-                        description: fragmentData.description,
-                        fragmentType: fragmentType,
-                        powerLevel: fragmentData.powerLevel,
-                        pythonCapability: "# Advanced ${fragmentType.toLowerCase()} capability\n# Unlocked through defrag bot victory",
-                        quantity: 1,
-                        isActive: true,
-                        discoveredDate: new Date(),
-                        owner: managedPlayer
-                )
-                newFragment.save(failOnError: true)
-                println 'RETURNING THE FRAGMENT, FRAGMENT MADE'
-                return fragmentData
-            }
-            println 'RETURNING NULL FRAGMENT NOT MADE'
-            return null
-        }
-    }
 
     // TODO: Move this logic to the PlayerHelp helper class
     private String handleCatCommand(String command, LambdaPlayer player) {
@@ -709,7 +692,7 @@ class TelnetServerService {
     private String handlePickupCommand(LambdaPlayer player) {
         def fragment = findFragmentAtCoordinates(player)
         if (!fragment) {
-            return "No logic fragment found at current coordinates (${player.positionX},${player.positionY})"
+            return "No logic fragment found at current coordinates (${player.positionX},${player.positionY})\r\n"
         }
         
         def resultMessage = ""
@@ -1163,205 +1146,7 @@ class TelnetServerService {
 
 
 
-    private String handleDefragEncounter(String command, LambdaPlayer player, PrintWriter writer) {
-        def defragBot = activeDefragSessions[writer]
-        if (!defragBot) {
-            activeDefragSessions.remove(writer)
-            return "No active defrag encounter found."
-        }
-        
-        def result = defragBotService.handleDefragCommand(defragBot, command, player)
-        
-        if (result.success) {
-            // Player defeated the defrag bot
-            activeDefragSessions.remove(writer)
-            audioService.playSound("defrag_victory")
-            
-            def response = new StringBuilder()
-            response.append(TerminalFormatter.formatText("✅ DEFRAG BOT TERMINATED!", 'bold', 'green')).append('\n')
-            response.append(result.output).append('\n')
-            
-            // Apply rewards
-            if (result.rewards.bits) {
-                lambdaPlayerService.addBits(player, result.rewards.bits)
-                audioService.playSound("bits_earned")
-                response.append(TerminalFormatter.formatText("Earned ${result.rewards.bits} bits!", 'bold', 'yellow')).append('\n')
-                
-                // Update session player object with new bits
-                LambdaPlayer.withTransaction {
-                    def updatedPlayer = LambdaPlayer.get(player.id)
-                    if (updatedPlayer) {
-                        playerSessions[writer] = updatedPlayer
-                        player.bits = updatedPlayer.bits
-                    }
-                }
-            }
-            
-            if (result.rewards.stolenFragment) {
-                // Return stolen fragment to player
-                def fragment = result.rewards.stolenFragment
-                response.append(TerminalFormatter.formatText("Recovered stolen logic fragment: ${fragment.name}!", 'bold', 'cyan')).append('\n')
-            }
-            
-            if (result.rewards.specialItem) {
-                try {
-                    println "DEBUG TelnetServer: Creating special item '${result.rewards.specialItem}' for player ${player.displayName} (ID: ${player.id})"
-                    def item = specialItemService.createSpecialItem(player, result.rewards.specialItem)
-                    audioService.playSound("item_found")
-                    if (item) {
-                        println "DEBUG TelnetServer: Item creation SUCCESS - ${item.name} (ID: ${item.id})"
-                        response.append(TerminalFormatter.formatText("Found special item: ${item.name}!", 'bold', 'magenta')).append('\n')
-                        response.append(TerminalFormatter.formatText("${item.description}", 'italic', 'white')).append('\n')
-                    } else {
-                        println "DEBUG TelnetServer: Item creation FAILED - createSpecialItem returned null"
-                        response.append(TerminalFormatter.formatText("Found special item: ${result.rewards.specialItem}!", 'bold', 'magenta')).append('\n')
-                        response.append(TerminalFormatter.formatText("⚠️ Item creation failed - please contact admin", 'italic', 'red')).append('\n')
-                    }
-                } catch (Exception e) {
-                    println "DEBUG TelnetServer: Exception during item creation: ${e.class.simpleName}: ${e.message}"
-                    e.printStackTrace()
-                    response.append(TerminalFormatter.formatText("Found special item: ${result.rewards.specialItem}!", 'bold', 'magenta')).append('\n')
-                    response.append(TerminalFormatter.formatText("⚠️ Item creation error - ${e.message}", 'italic', 'red')).append('\n')
-                }
-            }
-            
-            if (result.rewards.puzzleFragment) {
-                try {
-                    def puzzleResult = puzzleService.awardPuzzleFragment(player, result.rewards.puzzleFragment)
-                    if (puzzleResult.success) {
-                        audioService.playSound("fragment_pickup")
-                        response.append(TerminalFormatter.formatText("${puzzleResult.message}!", 'bold', 'purple')).append('\n')
-                        response.append(TerminalFormatter.formatText("Executable logic fragment acquired - use 'pinv' to view!", 'italic', 'white')).append('\n')
-                    } else {
-                        response.append(TerminalFormatter.formatText("Puzzle fragment found: ${result.rewards.puzzleFragment}!", 'bold', 'purple')).append('\n')
-                        response.append(TerminalFormatter.formatText("⚠️ ${puzzleResult.message}", 'italic', 'red')).append('\n')
-                    }
-                } catch (Exception e) {
-                    println "DEBUG TelnetServer: Exception during puzzle fragment award: ${e.message}"
-                    response.append(TerminalFormatter.formatText("Puzzle fragment found: ${result.rewards.puzzleFragment}!", 'bold', 'purple')).append('\n')
-                }
-            }
-            
-            if (result.rewards.elementalNonce) {
-                try {
-                    def nonceResult = puzzleService.awardNonce(player, result.rewards.elementalNonce)
-                    if (nonceResult.success) {
-                        audioService.playSound("item_found")
-                        response.append(TerminalFormatter.formatText("${nonceResult.message}!", 'bold', 'magenta')).append('\n')
-                        response.append(TerminalFormatter.formatText("${nonceResult.nonce?.getChemicalHint() ?: 'Chemical signature detected!'}", 'italic', 'yellow')).append('\n')
-                        response.append(TerminalFormatter.formatText("Use 'pinv' to view your nonce collection!", 'italic', 'white')).append('\n')
-                    } else {
-                        response.append(TerminalFormatter.formatText("Elemental nonce discovered: ${result.rewards.elementalNonce}!", 'bold', 'magenta')).append('\n')
-                        response.append(TerminalFormatter.formatText("⚠️ ${nonceResult.message}", 'italic', 'red')).append('\n')
-                    }
-                } catch (Exception e) {
-                    println "DEBUG TelnetServer: Exception during nonce award: ${e.message}"
-                    response.append(TerminalFormatter.formatText("Elemental nonce discovered: ${result.rewards.elementalNonce}!", 'bold', 'magenta')).append('\n')
-                }
-            }
-            
-            if (result.rewards.logicFragment) {
-                // Add logic fragment to player inventory
-                def fragmentType = result.rewards.logicFragment
-                def fragmentData = createLogicFragmentFromType(fragmentType, player)
-                if (fragmentData) {
-                    response.append(TerminalFormatter.formatText("Discovered logic fragment: ${fragmentData.name}!", 'bold', 'cyan')).append('\n')
-                } else {
-                    response.append(TerminalFormatter.formatText("Discovered logic fragment: ${result.rewards.logicFragment}!", 'bold', 'cyan')).append('\n')
-                }
-            }
-            
-            return response.toString()
-            
-        } else if (result.action == 'help') {
-            // Show defrag help with file system instructions
-            def helpDisplay = new StringBuilder()
-            helpDisplay.append(TerminalFormatter.formatText("⚠️  DEFRAG PROCESS ANALYSIS", 'bold', 'red')).append('\n')
-            helpDisplay.append(result.output.replace('\\n', '\n')).append('\n')
-            return helpDisplay.toString()
-            
-        } else if (result.action == 'file_view') {
-            // Show file content for cat command
-            def fileDisplay = new StringBuilder()
-            fileDisplay.append(TerminalFormatter.formatText("=== /proc/defrag/${defragBot.botId} ===", 'bold', 'cyan')).append('\n')
-            fileDisplay.append(result.output).append('\n')
-            return fileDisplay.toString()
-            
-        } else if (result.action == 'grep') {
-            // Show grep output
-            def grepDisplay = new StringBuilder()
-            if (result.pidAcquired) {
-                grepDisplay.append(TerminalFormatter.formatText(result.output, 'bold', 'green')).append('\n')
-                grepDisplay.append(TerminalFormatter.formatText("Use 'kill -9 ${defragBot.processId}' to terminate process!", 'italic', 'yellow'))
-            } else {
-                grepDisplay.append(TerminalFormatter.formatText("Grep output:", 'bold', 'cyan')).append('\n')
-                grepDisplay.append(result.output).append('\n')
-                grepDisplay.append(TerminalFormatter.formatText("Refine your regex to isolate the PID on its own line.", 'italic', 'yellow'))
-            }
-            return grepDisplay.toString()
-            
-        } else {
-            // Invalid command, timeout, or bit drain
-            def errorDisplay = new StringBuilder()
-            errorDisplay.append(TerminalFormatter.formatText("⚠️  ${result.output}", 'bold', 'red'))
-            
-            // Check if player got defragged
-            LambdaPlayer.withTransaction {
-                def refreshedPlayer = LambdaPlayer.get(player.id)
-                if (refreshedPlayer && refreshedPlayer.bits <= 0) {
-                    activeDefragSessions.remove(writer)
-                    errorDisplay.append('\n').append(TerminalFormatter.formatText("💀 DEFRAGGED! Respawning at (0,0) with 10 bits...", 'bold', 'red'))
-                    if (refreshedPlayer.logicFragments?.size() < player.logicFragments?.size()) {
-                        errorDisplay.append('\n').append(TerminalFormatter.formatText("Logic fragment stolen by defrag bot!", 'bold', 'red'))
-                    }
-                    playerSessions[writer] = refreshedPlayer
-                }
-            }
-            
-            return errorDisplay.toString()
-        }
-    }
     
-    private String handleDefragCommand(String command, LambdaPlayer player, PrintWriter writer) {
-        // Check if there's a defrag bot at the player's current position
-        def defragBot = null
-        DefragBot.withTransaction {
-            defragBot = DefragBot.findByMatrixLevelAndPositionXAndPositionY(
-                player.currentMatrixLevel, player.positionX, player.positionY
-            )
-        }
-        
-        if (!defragBot) {
-            return TerminalFormatter.formatText("No defrag bot present at current coordinates (${player.positionX},${player.positionY})", 'italic', 'yellow')
-        }
-        
-        // If there is a defrag bot, start an encounter
-        activeDefragSessions[writer] = defragBot
-        
-        def parts = command.trim().toLowerCase().split(' ')
-        if (parts.length > 1 && parts[1] == '-h') {
-            // Handle defrag -h help command
-            def result = defragBotService.handleDefragCommand(defragBot, command, player)
-            if (result.action == 'help') {
-                def helpDisplay = new StringBuilder()
-                helpDisplay.append(TerminalFormatter.formatText("⚠️  DEFRAG PROCESS ANALYSIS", 'bold', 'red')).append('\n')
-                helpDisplay.append(result.output.replace('\\n', '\n')).append('\n')
-                helpDisplay.append(TerminalFormatter.formatText("Find the kill command to terminate this process!", 'italic', 'yellow'))
-                return helpDisplay.toString()
-            }
-        }
-        
-        // Regular defrag command without -h
-        def encounter = new StringBuilder()
-        encounter.append(TerminalFormatter.formatText("⚠️  DEFRAG BOT ENCOUNTERED!", 'bold', 'red')).append('\n')
-        encounter.append(TerminalFormatter.formatText("System defragmentation process ${defragBot.botId} detected at (${player.positionX},${player.positionY})", 'italic', 'yellow')).append('\n')
-        encounter.append(TerminalFormatter.formatText("Difficulty Level: ${defragBot.difficultyLevel}/10", 'bold', 'yellow')).append('\n')
-        encounter.append(TerminalFormatter.formatText("Time limit: ${defragBot.timeLimit} seconds", 'bold', 'red')).append('\n')
-        encounter.append(TerminalFormatter.formatText("⚠️  BITS DRAINING: -5 bits every 5 seconds!", 'bold', 'red')).append('\n')
-        encounter.append("Type 'defrag -h' to learn how to find and terminate the process!")
-        
-        return encounter.toString()
-    }
 
     private void sendToAllClients(String message) {
         clientWriters.each { writer ->
