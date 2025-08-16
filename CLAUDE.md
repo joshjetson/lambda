@@ -65,6 +65,7 @@ The central goal is to defeat the Logic Daemon on each matrix level, which requi
 - Small, atomic commits for easy rollback
 - Test each change thoroughly before committing  
 - Use descriptive commit messages focusing on the specific change made
+- **NEVER mention Claude or AI assistance in commit messages**
 - If a change breaks anything, immediate `git reset --hard HEAD` to previous working state
 
 ## Development Commands
