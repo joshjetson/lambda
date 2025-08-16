@@ -521,4 +521,31 @@ class LambdaMerchantService {
         ]
         return outputMap[fragmentName] ?: "computational result"
     }
+
+    // ===== MERCHANT COMMAND HANDLER (moved from TelnetServerService) =====
+
+    String handleMerchantCommand(String command, LambdaPlayer player) {
+        // Check if there's a merchant at current position
+        def merchant = this.getMerchantAt(player.currentMatrixLevel, player.positionX, player.positionY)
+        if (!merchant) {
+            return "No Lambda merchant at current coordinates (${player.positionX},${player.positionY}). Use 'map' to find merchants. (M)\r\n"
+        }
+        
+        def result = this.handleMerchantInteraction(merchant, command, player)
+        
+        // Convert \n to \r\n for proper telnet formatting
+        def output = result.output?.replace('\n', '\r\n') ?: ""
+        
+        if (result.action == "browse") {
+            return output
+        } else if (result.action == "purchase") {
+            return TerminalFormatter.formatText(output, 'bold', 'green')
+        } else if (result.action == "sale") {
+            return TerminalFormatter.formatText(output, 'bold', 'green')
+        } else if (result.action == "help") {
+            return TerminalFormatter.formatText(output, 'italic', 'yellow')
+        } else {
+            return TerminalFormatter.formatText(output, 'bold', 'red')
+        }
+    }
 }

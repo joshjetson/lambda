@@ -70,9 +70,9 @@ class TelnetServerService {
             },
             'collect_var': { player, command, parts, writer ->
                 if (parts.length > 1) {
-                    return handleCollectVariableCommand(parts[1], player)
+                    return puzzleService.handleCollectVariableCommand(parts[1], player)
                 }
-                return "Usage: collect_var <variable_name> - Collect hidden variable"
+                return "Usage: collect_var <variable_name> - Collect hidden variable\r\n"
             },
             'execute': { player, command, parts, writer ->
                 handleExecuteCommand(command, player)
@@ -102,13 +102,13 @@ class TelnetServerService {
                 return "Usage: recurse <ability> - Use ethnicity recursion power"
             },
             'shop': { player, command, parts, writer ->
-                handleMerchantCommand(command, player)
+                lambdaMerchantService.handleMerchantCommand(command, player)
             },
             'buy': { player, command, parts, writer ->
-                handleMerchantCommand(command, player)
+                lambdaMerchantService.handleMerchantCommand(command, player)
             },
             'sell': { player, command, parts, writer ->
-                handleMerchantCommand(command, player)
+                lambdaMerchantService.handleMerchantCommand(command, player)
             },
             'entropy': { player, command, parts, writer ->
                 handleEntropyCommand(command, player, writer)
@@ -132,7 +132,7 @@ class TelnetServerService {
                 handleRepairCommand(command, player)
             },
             'map': { player, command, parts, writer ->
-                showMatrixMap(player)
+                lambdaPlayerService.showMatrixMap(player)
             },
             'clear': { player, command, parts, writer ->
                 clearTerminal()
@@ -938,27 +938,6 @@ class TelnetServerService {
         return "${originalCapability}\n\n# Enhanced fusion variant with 25% improved efficiency"
     }
     
-    private String handleMerchantCommand(String command, LambdaPlayer player) {
-        // Check if there's a merchant at current position
-        def merchant = lambdaMerchantService.getMerchantAt(player.currentMatrixLevel, player.positionX, player.positionY)
-        if (!merchant) {
-            return "No Lambda merchant at current coordinates (${player.positionX},${player.positionY}). Use 'map' to find merchants. (M) "
-        }
-        
-        def result = lambdaMerchantService.handleMerchantInteraction(merchant, command, player)
-        
-        if (result.action == "browse") {
-            return result.output
-        } else if (result.action == "purchase") {
-            return TerminalFormatter.formatText(result.output, 'bold', 'green')
-        } else if (result.action == "sale") {
-            return TerminalFormatter.formatText(result.output, 'bold', 'green')
-        } else if (result.action == "help") {
-            return TerminalFormatter.formatText(result.output, 'italic', 'yellow')
-        } else {
-            return TerminalFormatter.formatText(result.output, 'bold', 'red')
-        }
-    }
     
     private String viewFragmentFile(LambdaPlayer player) {
         def fragmentFile = new StringBuilder()
@@ -1405,122 +1384,6 @@ class TelnetServerService {
 
 // You can remove the isUnicodeSupported() method - we don't need it anymore
 
-    private String showMatrixMap(LambdaPlayer player) {
-        def map = new StringBuilder()
-
-        // Header with ANSI colors
-        map.append("\033[1;36m=== MATRIX LEVEL ${player.currentMatrixLevel} MAP ===\033[0m\r\n")
-        map.append("\033[3;37mLegend: @ = You, D = Defrag Bot, F = Fragment, M = Merchant, X = Wiped, ! = Critical, . = OK\033[0m\r\n\r\n")
-
-        // Get health data for entire matrix level - wrap in transaction
-        def healthMap = [:]
-        LambdaPlayer.withTransaction {
-            healthMap = coordinateStateService.getMatrixLevelHealth(player.currentMatrixLevel)
-        }
-
-        // Build 10x10 map (Y=9 at top, Y=0 at bottom to match normal coordinates)
-        for (int y = 9; y >= 0; y--) {
-            // Y-axis label in white
-            map.append("\033[1;37m${y}\033[0m ")
-
-            for (int x = 0; x <= 9; x++) {
-                def symbol = "."
-                def colorCode = "32" // green default
-
-                // Check if this is the player's position
-                if (x == player.positionX && y == player.positionY) {
-                    symbol = "@"
-                    colorCode = "1;36" // bold cyan
-                } else {
-                    // Check coordinate health
-                    def health = healthMap["${x},${y}"]
-                    if (health) {
-                        if (health.health <= 0) {
-                            symbol = "X"
-                            colorCode = "1;31" // bold red
-                        } else if (health.health <= 25) {
-                            symbol = "!"
-                            colorCode = "1;31" // bold red
-                        } else if (health.health <= 50) {
-                            symbol = "!"
-                            colorCode = "1;33" // bold yellow
-                        }
-                    }
-
-                    // Check for defrag bot (overrides health display)
-                    def bot = null
-                    LambdaPlayer.withTransaction {
-                        bot = DefragBot.findByMatrixLevelAndPositionXAndPositionYAndIsActive(
-                                player.currentMatrixLevel, x, y, true
-                        )
-                    }
-                    if (bot) {
-                        symbol = "D"
-                        colorCode = "1;31" // bold red
-                    }
-
-                    // Check for fragment (lower priority than defrag bot)
-                    else if (symbol == "." || symbol == "!") {
-                        def fragment = gameSessionService.getFragmentAtCoordinates(player.currentMatrixLevel, x, y)
-                        if (fragment) {
-                            symbol = "F"
-                            colorCode = "1;32" // bold green
-                        }
-                    }
-
-                    // Check for merchant (lowest priority)
-                    if (symbol == "." || symbol == "!") {
-                        try {
-                            def merchant = null
-                            LambdaPlayer.withTransaction {
-                                merchant = lambdaMerchantService.getMerchantAt(player.currentMatrixLevel, x, y)
-                            }
-                            if (merchant) {
-                                symbol = "M"
-                                colorCode = "1;33" // bold yellow
-                            }
-                        } catch (Exception e) {
-                            // Ignore merchant service errors
-                        }
-                    }
-                }
-
-                // Add the colored symbol
-                map.append("\033[${colorCode}m${symbol}\033[0m")
-
-                // Add space between symbols (but not after the last one)
-                if (x < 9) {
-                    map.append(" ")
-                }
-            }
-            map.append("\r\n")
-        }
-
-        // Add X-axis labels
-        map.append("  ") // Two spaces to align with Y-axis label
-        for (int x = 0; x <= 9; x++) {
-            map.append("\033[1;37m${x}\033[0m")
-            if (x < 9) {
-                map.append(" ")
-            }
-        }
-        map.append("\r\n\r\n")
-
-        // Add coordinate health summary
-        def totalCoords = 100
-        def wipedCoords = healthMap.values().count { it.health <= 0 }
-        def criticalCoords = healthMap.values().count { it.health > 0 && it.health <= 25 }
-        def damagedCoords = healthMap.values().count { it.health > 25 && it.health < 100 }
-        def healthyCoords = totalCoords - wipedCoords - criticalCoords - damagedCoords
-
-        map.append("\033[1;37mMatrix Level Health Summary:\033[0m\r\n")
-        map.append("Operational: \033[1;32m${healthyCoords}\033[0m  ")
-        map.append("Damaged: \033[1;33m${damagedCoords}\033[0m  ")
-        map.append("Critical: \033[1;31m${criticalCoords}\033[0m  ")
-        map.append("Wiped: \033[1;31m${wipedCoords}\033[0m\r\n")
-
-        return map.toString()
-    }
 
 
 
@@ -1894,15 +1757,6 @@ class TelnetServerService {
     
     // ============ PUZZLE SYSTEM COMMAND HANDLERS ============
     
-    private String handleCollectVariableCommand(String variableName, LambdaPlayer player) {
-        def result = puzzleService.collectVariable(player, variableName, player.currentMatrixLevel, player.positionX, player.positionY)
-        if (result.success) {
-            audioService.playSound("item_found")
-            return "${TerminalFormatter.formatText('✅ VARIABLE COLLECTED!', 'bold', 'green')}\n${result.message}\n${result.variable?.getUsageHint() ?: ''}"
-        } else {
-            return "${TerminalFormatter.formatText('❌ Collection Failed', 'bold', 'red')}\n${result.message}"
-        }
-    }
     
     private String handleChmodCommand(String command, LambdaPlayer player) {
         def parts = command.trim().split(' ')

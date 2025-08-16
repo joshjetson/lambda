@@ -889,9 +889,9 @@ class DefragBotService {
                 description: fragmentData.description,
                 fragmentType: fragmentType,
                 powerLevel: fragmentData.powerLevel,
-                pythonCode: "# ${fragmentData.name}\n# Power Level: ${fragmentData.powerLevel}\nprint('${fragmentData.name} executed')",
+                pythonCapability: "# ${fragmentData.name}\n# Power Level: ${fragmentData.powerLevel}\nprint('${fragmentData.name} executed')",
                 quantity: 1,
-                pickedUpDate: new Date()
+                discoveredDate: new Date()
             )
             
             LambdaPlayer.withTransaction {

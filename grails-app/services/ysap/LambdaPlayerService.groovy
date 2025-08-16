@@ -8,6 +8,8 @@ class LambdaPlayerService {
     def entropyService
     def gameSessionService
     def audioService
+    def coordinateStateService
+    def lambdaMerchantService
 
     def createPlayer(String username, String displayName, String avatarSilhouette) {
         def player = new LambdaPlayer(
@@ -715,32 +717,120 @@ class LambdaPlayerService {
         else return "FAILING"
     }
 
-    private String showMatrixMap(LambdaPlayer player) {
+    String showMatrixMap(LambdaPlayer player) {
         def map = new StringBuilder()
-        map.append(TerminalFormatter.formatText("=== MATRIX LEVEL ${player.currentMatrixLevel} MAP ===", 'bold', 'cyan')).append('\r\n')
-        map.append("Current Position: (${player.positionX},${player.positionY})\r\n\r\n")
-        
+
+        // Header with ANSI colors
+        map.append("\033[1;36m=== MATRIX LEVEL ${player.currentMatrixLevel} MAP ===\033[0m\r\n")
+        map.append("\033[3;37mLegend: @ = You, D = Defrag Bot, F = Fragment, M = Merchant, X = Wiped, ! = Critical, . = OK\033[0m\r\n\r\n")
+
+        // Get health data for entire matrix level - wrap in transaction
+        def healthMap = [:]
+        LambdaPlayer.withTransaction {
+            healthMap = coordinateStateService.getMatrixLevelHealth(player.currentMatrixLevel)
+        }
+
+        // Build 10x10 map (Y=9 at top, Y=0 at bottom to match normal coordinates)
         for (int y = 9; y >= 0; y--) {
-            map.append(" ${y} ")
+            // Y-axis label in white
+            map.append("\033[1;37m${y}\033[0m ")
+
             for (int x = 0; x <= 9; x++) {
+                def symbol = "."
+                def colorCode = "32" // green default
+
+                // Check if this is the player's position
                 if (x == player.positionX && y == player.positionY) {
-                    map.append(TerminalFormatter.formatText("@", 'bold', 'green'))
+                    symbol = "@"
+                    colorCode = "1;36" // bold cyan
                 } else {
-                    def fragment = gameSessionService.getFragmentAtCoordinates(player.currentMatrixLevel, x, y)
-                    if (fragment) {
-                        map.append(TerminalFormatter.formatText("F", 'bold', 'yellow'))
-                    } else {
-                        map.append(".")
+                    // Check coordinate health
+                    def health = healthMap["${x},${y}"]
+                    if (health) {
+                        if (health.health <= 0) {
+                            symbol = "X"
+                            colorCode = "1;31" // bold red
+                        } else if (health.health <= 25) {
+                            symbol = "!"
+                            colorCode = "1;31" // bold red
+                        } else if (health.health <= 50) {
+                            symbol = "!"
+                            colorCode = "1;33" // bold yellow
+                        }
+                    }
+
+                    // Check for defrag bot (overrides health display)
+                    def bot = null
+                    LambdaPlayer.withTransaction {
+                        bot = DefragBot.findByMatrixLevelAndPositionXAndPositionYAndIsActive(
+                                player.currentMatrixLevel, x, y, true
+                        )
+                    }
+                    if (bot) {
+                        symbol = "D"
+                        colorCode = "1;31" // bold red
+                    }
+
+                    // Check for fragment (lower priority than defrag bot)
+                    else if (symbol == "." || symbol == "!") {
+                        def fragment = gameSessionService.getFragmentAtCoordinates(player.currentMatrixLevel, x, y)
+                        if (fragment) {
+                            symbol = "F"
+                            colorCode = "1;32" // bold green
+                        }
+                    }
+
+                    // Check for merchant (lowest priority)
+                    if (symbol == "." || symbol == "!") {
+                        try {
+                            def merchant = null
+                            LambdaPlayer.withTransaction {
+                                merchant = lambdaMerchantService.getMerchantAt(player.currentMatrixLevel, x, y)
+                            }
+                            if (merchant) {
+                                symbol = "M"
+                                colorCode = "1;33" // bold yellow
+                            }
+                        } catch (Exception e) {
+                            // Ignore merchant service errors
+                        }
                     }
                 }
-                map.append(" ")
+
+                // Add the colored symbol
+                map.append("\033[${colorCode}m${symbol}\033[0m")
+
+                // Add space between symbols (but not after the last one)
+                if (x < 9) {
+                    map.append(" ")
+                }
             }
             map.append("\r\n")
         }
-        
-        map.append("   0 1 2 3 4 5 6 7 8 9\r\n\r\n")
-        map.append("Legend: @ = You, F = Fragment\r\n")
-        
+
+        // Add X-axis labels
+        map.append("  ") // Two spaces to align with Y-axis label
+        for (int x = 0; x <= 9; x++) {
+            map.append("\033[1;37m${x}\033[0m")
+            if (x < 9) {
+                map.append(" ")
+            }
+        }
+        map.append("\r\n\r\n")
+
+        // Add coordinate health summary
+        def totalCoords = 100
+        def wipedCoords = healthMap.values().count { it.health <= 0 }
+        def criticalCoords = healthMap.values().count { it.health > 0 && it.health <= 25 }
+        def damagedCoords = healthMap.values().count { it.health > 25 && it.health < 100 }
+        def healthyCoords = totalCoords - wipedCoords - criticalCoords - damagedCoords
+
+        map.append("\033[1;37mMatrix Level Health Summary:\033[0m\r\n")
+        map.append("Operational: \033[1;32m${healthyCoords}\033[0m  ")
+        map.append("Damaged: \033[1;33m${damagedCoords}\033[0m  ")
+        map.append("Critical: \033[1;31m${criticalCoords}\033[0m  ")
+        map.append("Wiped: \033[1;31m${wipedCoords}\033[0m\r\n")
+
         return map.toString()
     }
 

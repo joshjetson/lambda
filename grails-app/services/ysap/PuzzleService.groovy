@@ -8,6 +8,7 @@ class PuzzleService {
     
     def puzzleRandomizationService
     def competitivePuzzleService
+    def audioService
     
     def initializePuzzleSystem() {
         // Initialize base puzzle logic fragments (these are reusable across all sessions)
@@ -460,5 +461,18 @@ class PuzzleService {
         }
         
         return result
+    }
+
+    // ===== COLLECT VARIABLE COMMAND (moved from TelnetServerService) =====
+
+    String handleCollectVariableCommand(String variableName, LambdaPlayer player) {
+        
+        def result = this.collectVariable(player, variableName, player.currentMatrixLevel, player.positionX, player.positionY)
+        if (result.success) {
+            audioService.playSound("item_found")
+            return "${TerminalFormatter.formatText('✅ VARIABLE COLLECTED!', 'bold', 'green')}\r\n${result.message}\r\n${result.variable?.getUsageHint() ?: ''}"
+        } else {
+            return "${TerminalFormatter.formatText('❌ Collection Failed', 'bold', 'red')}\r\n${result.message}"
+        }
     }
 }
