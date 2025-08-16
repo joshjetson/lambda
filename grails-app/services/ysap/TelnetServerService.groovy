@@ -29,6 +29,139 @@ class TelnetServerService {
     private List<PrintWriter> clientWriters = new CopyOnWriteArrayList<>() // Thread-safe list
     public Map<PrintWriter, LambdaPlayer> playerSessions = [:] // Track player sessions
     public Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters
+    private Map<String, Closure> commandHandlers = [
+            'status': { player, command, parts, writer ->
+                lambdaPlayerService.getPlayerStatus(player)
+            },
+            'cc': { player, command, parts, writer ->
+                coordinateStateService.handleCoordinateChange(command, player, writer)
+            },
+            'scan': { player, command, parts, writer ->
+                gameSessionService.scanArea(player)
+            },
+            'inventory': { player, command, parts, writer ->
+                lambdaPlayerService.showInventory(player)
+            },
+            'heap': { player, command, parts, writer ->
+                chatService.enterChat(player, writer)
+            },
+            'defrag': { player, command, parts, writer ->
+                def result = defragBotService.handleDefragCommandFromTelnet(command, player, writer)
+                // Also need to track the encounter in the activeDefragSessions
+                def defragBot = null
+                DefragBot.withTransaction {
+                    defragBot = DefragBot.findByMatrixLevelAndPositionXAndPositionY(
+                            player.currentMatrixLevel, player.positionX, player.positionY
+                    )
+                }
+                if (defragBot) {
+                    activeDefragSessions[writer] = defragBot
+                }
+                return result
+            },
+            'cat': { player, command, parts, writer ->
+                lambdaPlayerService.handleCatCommand(command, player)
+            },
+            'pickup': { player, command, parts, writer ->
+                lambdaPlayerService.handlePickupCommand(player)
+            },
+            'symbols': { player, command, parts, writer ->
+                elementalSymbolService.getPlayerSymbolStatus(player)
+            },
+            'collect_var': { player, command, parts, writer ->
+                if (parts.length > 1) {
+                    return handleCollectVariableCommand(parts[1], player)
+                }
+                return "Usage: collect_var <variable_name> - Collect hidden variable"
+            },
+            'execute': { player, command, parts, writer ->
+                handleExecuteCommand(command, player)
+            },
+            'puzzle_inventory': { player, command, parts, writer ->
+                showPuzzleInventory(player)
+            },
+            'pinv': { player, command, parts, writer ->
+                showPuzzleInventory(player)
+            },
+            'puzzle_progress': { player, command, parts, writer ->
+                showCompetitivePuzzleProgress(player)
+            },
+            'pprog': { player, command, parts, writer ->
+                showCompetitivePuzzleProgress(player)
+            },
+            'puzzle_market': { player, command, parts, writer ->
+                showPuzzleKnowledgeMarket(player)
+            },
+            'pmarket': { player, command, parts, writer ->
+                showPuzzleKnowledgeMarket(player)
+            },
+            'recurse': { player, command, parts, writer ->
+                if (parts.length > 1) {
+                    return handleRecurseCommand(parts[1], player, writer)
+                }
+                return "Usage: recurse <ability> - Use ethnicity recursion power"
+            },
+            'shop': { player, command, parts, writer ->
+                handleMerchantCommand(command, player)
+            },
+            'buy': { player, command, parts, writer ->
+                handleMerchantCommand(command, player)
+            },
+            'sell': { player, command, parts, writer ->
+                handleMerchantCommand(command, player)
+            },
+            'entropy': { player, command, parts, writer ->
+                handleEntropyCommand(command, player, writer)
+            },
+            'mine': { player, command, parts, writer ->
+                handleMiningCommand(player, writer)
+            },
+            'mining': { player, command, parts, writer ->
+                handleMiningCommand(player, writer)
+            },
+            'fuse': { player, command, parts, writer ->
+                handleFusionCommand(command, player)
+            },
+            'fusion': { player, command, parts, writer ->
+                handleFusionCommand(command, player)
+            },
+            'use': { player, command, parts, writer ->
+                handleUseCommand(command, player)
+            },
+            'repair': { player, command, parts, writer ->
+                handleRepairCommand(command, player)
+            },
+            'map': { player, command, parts, writer ->
+                showMatrixMap(player)
+            },
+            'clear': { player, command, parts, writer ->
+                clearTerminal()
+            },
+            'ls': { player, command, parts, writer ->
+                listFiles(player)
+            },
+            'chmod': { player, command, parts, writer ->
+                handleChmodCommand(command, player)
+            },
+            'defrag_status': { player, command, parts, writer ->
+                showAutoDefragStatus()
+            },
+            'autdefrag': { player, command, parts, writer ->
+                showAutoDefragStatus()
+            },
+            'session': { player, command, parts, writer ->
+                showSessionInfo()
+            },
+            'help': { player, command, parts, writer ->
+                if (parts.length > 1) {
+                    return PlayerHelp.showHelp(parts[1])
+                }
+                return PlayerHelp.showHelp()
+            },
+            'history': { player, command, parts, writer ->
+                showCommandHistory(player)
+            }
+    ]
 
     String createWelcomeLogo() {
         def asciiArt = """
@@ -447,15 +580,15 @@ class TelnetServerService {
         writer.println(TerminalFormatter.formatText(dashboardString, 'bold', 'cyan'))
         writer.println()
     }
-    
+
     private String processGameCommand(String command, LambdaPlayer player, PrintWriter writer) {
 
         // Handle quit command
         if (command == null || command.trim().equalsIgnoreCase("quit")) {
             audioService.playSound("logout")
-            return "QUIT:" + TerminalFormatter.formatText("Lambda entity disconnecting...", 'italic', 'yellow')
+            return "QUIT:" + TerminalFormatter.formatText("Lambda entity disconnecting...\r\n", 'italic', 'yellow')
         }
-        
+
         // Check if player is in an active defrag encounter
         if (activeDefragSessions.containsKey(writer)) {
             def defragBot = activeDefragSessions[writer]
@@ -466,11 +599,11 @@ class TelnetServerService {
             }
             return result
         }
-        
+
         // Refresh player state and check if player is in mingle mode
         // Note: isInMingle is really is in chat
         def isInMingle = false
-        LambdaPlayer.withTransaction { 
+        LambdaPlayer.withTransaction {
             def refreshedPlayer = LambdaPlayer.get(player.id)
             isInMingle = refreshedPlayer?.isInMingle ?: false
             if (isInMingle) {
@@ -478,108 +611,29 @@ class TelnetServerService {
                 playerSessions[writer] = refreshedPlayer
             }
         }
-        
+
         if (isInMingle) {
             def refreshedPlayer = playerSessions[writer]
             return chatService.handleChatCommand(command, refreshedPlayer, writer)
         }
-        
+
         def parts = command.trim().toLowerCase().split(' ')
         def cmd = parts[0]
-       //TODO: Put all the logic for each case in its respective service and out of this TelnetServerService
-        switch (cmd) {
-            case 'status':
-                return lambdaPlayerService.getPlayerStatus(player)
-            case 'cc':
-                return coordinateStateService.handleCoordinateChange(command, player, writer)
-            case 'scan':
-                return gameSessionService.scanArea(player)
-            case 'inventory':
-                return lambdaPlayerService.showInventory(player)
-            case 'heap':
-                return chatService.enterChat(player, writer)
-            case 'defrag':
-                def result = defragBotService.handleDefragCommandFromTelnet(command, player, writer)
-                // Also need to track the encounter in the activeDefragSessions
-                def defragBot = null
-                DefragBot.withTransaction {
-                    defragBot = DefragBot.findByMatrixLevelAndPositionXAndPositionY(
-                        player.currentMatrixLevel, player.positionX, player.positionY
-                    )
-                }
-                if (defragBot) {
-                    activeDefragSessions[writer] = defragBot
-                }
-                return result
-            case 'cat':
-                return handleCatCommand(command, player)
-            case 'pickup':
-                return handlePickupCommand(player)
-            // Note: 'collect' command removed - symbols only obtained through puzzle-solving
-            case 'symbols':
-                return elementalSymbolService.getPlayerSymbolStatus(player)
-            case 'collect_var':
-                if (parts.length > 1) {
-                    return handleCollectVariableCommand(parts[1], player)
-                }
-                return "Usage: collect_var <variable_name> - Collect hidden variable"
-            case 'execute':
-                return handleExecuteCommand(command, player)
-            case 'puzzle_inventory':
-            case 'pinv':
-                return showPuzzleInventory(player)
-            case 'puzzle_progress':
-            case 'pprog':
-                return showCompetitivePuzzleProgress(player)
-            case 'puzzle_market':
-            case 'pmarket':
-                return showPuzzleKnowledgeMarket(player)
-            case 'recurse':
-                if (parts.length > 1) {
-                    return handleRecurseCommand(parts[1], player, writer)
-                }
-                return "Usage: recurse <ability> - Use ethnicity recursion power"
-            case 'shop':
-            case 'buy':
-            case 'sell':
-                return handleMerchantCommand(command, player)
-            case 'entropy':
-                return handleEntropyCommand(command, player, writer)
-            case 'mine':
-            case 'mining':
-                return handleMiningCommand(player, writer)
-            case 'fuse':
-            case 'fusion':
-                return handleFusionCommand(command, player)
-            case 'use':
-                return handleUseCommand(command, player)
-            case 'repair':
-                return handleRepairCommand(command, player)
-            case 'map':
-                return showMatrixMap(player)
-            case 'clear':
-                return clearTerminal()
-            case 'ls':
-                return listFiles(player)
-            case 'chmod':
-                return handleChmodCommand(command, player)
-            case 'defrag_status':
-            case 'autdefrag':
-                return showAutoDefragStatus()
-            case 'session':
-                return showSessionInfo()
-            case 'help':
-                if (parts.length > 1) {
-                    return PlayerHelp.showHelp(parts[1])
-                }
-                return PlayerHelp.showHelp()
-            case 'history':
-                return showCommandHistory(player)
-            default:
-                audioService.playSound("error")
-                return "Unknown command: $command. Type 'help' for available commands.\r\n"
+
+        // Python dict.get() equivalent - fast hash lookup, returns null if not found
+        def handler = commandHandlers.get(cmd)
+
+        if (handler) {
+            return handler.call(player, command, parts, writer)
+        } else {
+            // Default case - command not found
+            audioService.playSound("error")
+            return "Unknown command: $command. Type 'help' for available commands.\r\n"
         }
+
+        //TODO: Put all the logic for each case in its respective service and out of this TelnetServerService
     }
+    
 
     private String handleUseCommand(String command, LambdaPlayer player) {
         def parts = command.trim().split(' ', 2)
@@ -639,149 +693,6 @@ class TelnetServerService {
         return usage.toString()
     }
 
-
-    // TODO: Move this logic to the PlayerHelp helper class
-    private String handleCatCommand(String command, LambdaPlayer player) {
-        def parts = command.trim().split(' ')
-        if (parts.length < 2) {
-            return "Usage: cat <filename>"
-        }
-        
-        def filename = parts[1]
-        
-        // Handle fragment_file viewing
-        if (filename == "fragment_file") {
-            return viewFragmentFile(player)
-        }
-        
-        // Handle system files from ls command
-        switch (filename) {
-            case 'status_log':
-                return lambdaPlayerService.getPlayerStatus(player)
-            case 'inventory_data':
-                return lambdaPlayerService.showInventory(player)
-            case 'entropy_monitor':
-                return viewEntropyMonitor(player)
-            case 'system_map':
-                return showMatrixMap(player)
-            case 'python_env':
-                return viewPythonEnvironment(player)
-            case 'item_registry':
-                return viewItemRegistry(player)
-            case 'exploration_log':
-                return viewExplorationLog(player)
-            case 'ethnicity_config':
-                return viewEthnicityConfig(player)
-        }
-        
-        // Handle specific fragment viewing
-        def fragment = findPlayerFragment(player, filename)
-        if (fragment) {
-            return viewFragmentContent(fragment)
-        }
-        
-        // Check if there's a logic fragment at current coordinates
-        def coordinateFragment = findFragmentAtCoordinates(player)
-        if (coordinateFragment && coordinateFragment.name.toLowerCase().replace(' ', '_') == filename.toLowerCase()) {
-            return viewFragmentContent(coordinateFragment)
-        }
-        
-        return "File not found: ${filename}"
-    }
-    
-    private String handlePickupCommand(LambdaPlayer player) {
-        def fragment = findFragmentAtCoordinates(player)
-        if (!fragment) {
-            return "No logic fragment found at current coordinates (${player.positionX},${player.positionY})\r\n"
-        }
-        
-        def resultMessage = ""
-        
-        // All database operations must be within transaction
-        LambdaPlayer.withTransaction {
-            // Check if player has already picked up a fragment at this coordinate
-            def existingPickup = FragmentPickup.findByPlayerUsernameAndMatrixLevelAndPositionXAndPositionY(
-                player.username, 
-                player.currentMatrixLevel, 
-                player.positionX, 
-                player.positionY
-            )
-            
-            if (existingPickup) {
-                resultMessage = "You have already collected a logic fragment from this coordinate. Fragments respawn elsewhere after pickup."
-                return // Exit transaction early
-            }
-            
-            // Check if player already has this fragment
-            def existingFragment = findPlayerFragment(player, fragment.name)
-            def managedPlayer = LambdaPlayer.get(player.id)
-            
-            if (managedPlayer) {
-                if (existingFragment) {
-                    // Increment quantity of existing fragment
-                    def managedFragment = LogicFragment.get(existingFragment.id)
-                    if (managedFragment) {
-                        managedFragment.quantity += 1
-                        managedFragment.save(failOnError: true)
-                        audioService.playSound("fragment_pickup")
-                        resultMessage = "Logic fragment '${fragment.name}' acquired! Quantity: x${managedFragment.quantity}"
-                        def validFragments = managedPlayer.logicFragments?.findAll { it != null }
-                        if (validFragments?.size() > 0) {
-                            validFragments.each { frag ->
-                                if (frag?.name) {
-                                    println "Player has fragment: ${frag.name} (${frag.fragmentType}) - Level ${frag.powerLevel}, Quantity: ${frag.quantity}"
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Create new fragment entry
-                    def newFragment = new LogicFragment(
-                        name: fragment.name,
-                        description: fragment.description,
-                        fragmentType: fragment.fragmentType,
-                        powerLevel: fragment.powerLevel,
-                        pythonCapability: fragment.pythonCapability,
-                        quantity: 1,
-                        isActive: true,
-                        discoveredDate: new Date(),
-                        owner: managedPlayer
-                    )
-                    newFragment.save(failOnError: true)
-                    managedPlayer.addToLogicFragments(newFragment)
-                    managedPlayer.save(failOnError: true)
-                    def validFragments = managedPlayer.logicFragments?.findAll { it != null }
-                    if (validFragments?.size() > 0) {
-                        validFragments.each { frag ->
-                            if (frag?.name) {
-                                println "Player has fragment: ${frag.name} (${frag.fragmentType}) - Level ${frag.powerLevel}, Quantity: ${frag.quantity}"
-                            }
-                        }
-                    }
-                    audioService.playSound("fragment_pickup")
-                    resultMessage = "Logic fragment '${fragment.name}' acquired and added to your fragment file!"
-                }
-                
-                // Record the pickup to prevent infinite collection at this coordinate
-                def fragmentPickup = new FragmentPickup(
-                    playerUsername: managedPlayer.username,
-                    matrixLevel: managedPlayer.currentMatrixLevel,
-                    positionX: managedPlayer.positionX,
-                    positionY: managedPlayer.positionY,
-                    fragmentName: fragment.name,
-                    pickedUpAt: new Date()
-                )
-                fragmentPickup.save(failOnError: true)
-            }
-        }
-        
-        // Respawn fragment at random coordinates on the same level (outside transaction)
-        if (resultMessage.contains("acquired")) {
-            respawnFragmentAtRandomLocation(fragment, player.currentMatrixLevel)
-        }
-        
-        return resultMessage
-    }
     
     // Note: handleCollectSymbolCommand removed - symbols only obtained through puzzle-solving
     
@@ -1113,10 +1024,6 @@ class TelnetServerService {
         return foundFragment
     }
     
-    private LogicFragment findFragmentAtCoordinates(LambdaPlayer player) {
-        // Use game session service for truly random fragment distribution
-        return gameSessionService.getFragmentAtCoordinates(player.currentMatrixLevel, player.positionX, player.positionY)
-    }
     
     private List<String> scanExtendedFragmentRange(LambdaPlayer player) {
         def extendedFragments = []
@@ -1984,39 +1891,6 @@ class TelnetServerService {
         return "Recursive movement ready - next cc command will jump 2-3 coordinates"
     }
     
-    private void respawnFragmentAtRandomLocation(def fragment, Integer matrixLevel) {
-        FragmentPickup.withTransaction {
-            // Generate random coordinates for respawn (avoiding picked coordinates)
-            def maxAttempts = 20
-            def attempts = 0
-            def newX, newY
-            
-            while (attempts < maxAttempts) {
-                newX = (0..9).shuffled().first()
-                newY = (0..9).shuffled().first()
-                
-                // Check if any player has picked up a fragment at these coordinates
-                def existingPickup = FragmentPickup.findByMatrixLevelAndPositionXAndPositionY(
-                    matrixLevel, newX, newY
-                )
-                
-                if (!existingPickup) {
-                    // Found clear coordinates, update fragment hash for this location
-                    println "Fragment ${fragment.name} respawned at (${newX},${newY}) on level ${matrixLevel}"
-                    break
-                }
-                attempts++
-            }
-            
-            // If we couldn't find clear coordinates after 20 attempts, just use random ones
-            // This prevents infinite loops if the level becomes too picked-over
-            if (attempts >= maxAttempts) {
-                newX = (0..9).shuffled().first()
-                newY = (0..9).shuffled().first()
-                println "Fragment ${fragment.name} force-respawned at (${newX},${newY}) on level ${matrixLevel} after ${maxAttempts} attempts"
-            }
-        }
-    }
     
     // ============ PUZZLE SYSTEM COMMAND HANDLERS ============
     

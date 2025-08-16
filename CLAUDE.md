@@ -28,6 +28,45 @@ The central goal is to defeat the Logic Daemon on each matrix level, which requi
 - **Competitive Discovery**: Players must scan coordinates, collect clue fragments, and race to find elementals before others
 - **Environmental Challenges**: Defragged sectors (repair mini-games), defrag bots (Linux combat), merchants (trading/clues)
 
+## CRITICAL DEVELOPMENT GOVERNANCE (MANDATORY)
+
+### **Code Quality & Refactoring Rules**
+- **NO NEW SERVICES**: The codebase has too many services. NEVER create new services.
+- **Small, Focused Changes**: One thing at a time to prevent introducing bugs
+- **Service Extraction Pattern**: Move logic from `TelnetServerService.processGameCommand()` into existing services only
+- **Incremental Refactoring**: Small commits that can be easily reverted with `git reset --hard HEAD`
+- **Controlled Complexity**: Previous unrestricted development created a mess - now we use strict governance
+
+### **Current Refactoring Mission**
+- **Primary Goal**: Clean up `processGameCommand()` switch statement by moving logic to existing services
+- **Target Commands**: entropy, mining, recurse, execute, shop/buy/sell - move to appropriate existing services
+- **NO Service Creation**: Use `EntropyService`, `LambdaMerchantService`, etc. that already exist
+- **Quality over Speed**: Better to do small, correct changes than large risky ones
+
+### **Refactoring Progress Status**
+**✅ COMPLETED EXTRACTIONS**:
+- `defrag` commands → `DefragBotService.handleDefragCommandFromTelnet()`
+- `cc` coordinate commands → `CoordinateStateService.handleCoordinateChange()`
+- `status` command → `LambdaPlayerService.getPlayerStatus()`
+- Chat functionality → `ChatService` (enterChat, handleChatCommand, broadcasting)
+- `cat` commands → `LambdaPlayerService.handleCatCommand()`
+- `pickup` commands → `LambdaPlayerService.handlePickupCommand()`
+
+**🔄 IN PROGRESS**: Command handlers map implementation in `TelnetServerService` 
+
+**⏳ REMAINING COMMANDS TO EXTRACT**:
+- `entropy` commands → move to `EntropyService`
+- `mining` commands → move to appropriate service
+- `recurse` commands → move to appropriate service  
+- `execute` commands → move to appropriate service
+- `shop`/`buy`/`sell` commands → move to `LambdaMerchantService`
+
+### **Git Workflow**
+- Small, atomic commits for easy rollback
+- Test each change thoroughly before committing  
+- Use descriptive commit messages focusing on the specific change made
+- If a change breaks anything, immediate `git reset --hard HEAD` to previous working state
+
 ## Development Commands
 
 ### Core Grails Commands

@@ -5,7 +5,9 @@ import ysap.helpers.BoxBuilder
 
 @Transactional
 class LambdaPlayerService {
-    def EntropyService
+    def entropyService
+    def gameSessionService
+    def audioService
 
     def createPlayer(String username, String displayName, String avatarSilhouette) {
         def player = new LambdaPlayer(
@@ -548,5 +550,509 @@ class LambdaPlayerService {
         }
 
         return inventory.toString()
+    }
+
+    // ===== CAT COMMAND METHODS (moved from TelnetServerService) =====
+
+    String handleCatCommand(String command, LambdaPlayer player) {
+        def parts = command.trim().split(' ')
+        if (parts.length < 2) {
+            return "Usage: cat <filename>"
+        }
+        
+        def filename = parts[1]
+        
+        // Handle fragment_file viewing
+        if (filename == "fragment_file") {
+            return viewFragmentFile(player)
+        }
+        
+        // Handle system files from ls command
+        switch (filename) {
+            case 'status_log':
+                return getPlayerStatus(player)
+            case 'inventory_data':
+                return showInventory(player)
+            case 'entropy_monitor':
+                return viewEntropyMonitor(player)
+            case 'system_map':
+                return showMatrixMap(player)
+            case 'python_env':
+                return viewPythonEnvironment(player)
+            case 'item_registry':
+                return viewItemRegistry(player)
+            case 'exploration_log':
+                return viewExplorationLog(player)
+            case 'ethnicity_config':
+                return viewEthnicityConfig(player)
+        }
+        
+        // Handle specific fragment viewing
+        def fragment = findPlayerFragment(player, filename)
+        if (fragment) {
+            return viewFragmentContent(fragment)
+        }
+        
+        // Check if there's a logic fragment at current coordinates
+        def coordinateFragment = findFragmentAtCoordinates(player)
+        if (coordinateFragment && coordinateFragment.name.toLowerCase().replace(' ', '_') == filename.toLowerCase()) {
+            return viewFragmentContent(coordinateFragment)
+        }
+        
+        return "File not found: ${filename}"
+    }
+
+    private String viewFragmentFile(LambdaPlayer player) {
+        def fragmentFile = new StringBuilder()
+        
+        // Get fresh player data from database to ensure we have latest fragments
+        def currentFragments = []
+        LambdaPlayer.withTransaction {
+            def managedPlayer = LambdaPlayer.get(player.id)
+            if (managedPlayer && managedPlayer.logicFragments) {
+                currentFragments = managedPlayer.logicFragments.findAll { it != null }.collect { it }
+            }
+        }
+        
+        fragmentFile.append("=== FRAGMENT_FILE ===\r\n")
+        fragmentFile.append("Lambda Entity: ${player.displayName}\r\n")
+        fragmentFile.append("Total Fragments: ${currentFragments.size()}\r\n\r\n")
+        
+        if (currentFragments) {
+            currentFragments.sort { it?.discoveredDate ?: new Date(0) }.each { fragment ->
+                if (fragment) {
+                    def quantityDisplay = (fragment.quantity ?: 1) > 1 ? " x${fragment.quantity}" : ""
+                    fragmentFile.append("--- ${fragment.name?.toUpperCase() ?: 'UNKNOWN'}${quantityDisplay} ---\r\n")
+                    fragmentFile.append("Type: ${fragment.fragmentType ?: 'UNKNOWN'}\r\n")
+                    fragmentFile.append("Power Level: ${fragment.powerLevel ?: 1}/10\r\n")
+                    fragmentFile.append("Quantity: ${fragment.quantity ?: 1}\r\n")
+                    def dateStr = fragment.discoveredDate ? new java.text.SimpleDateFormat('yyyy-MM-dd HH:mm').format(fragment.discoveredDate) : 'Unknown'
+                    fragmentFile.append("Discovered: ${dateStr}\r\n")
+                    fragmentFile.append("${fragment.pythonCapability ?: 'No capability data'}\r\n\r\n")
+                }
+            }
+        } else {
+            fragmentFile.append("No fragments collected yet.\r\n")
+            fragmentFile.append("Use 'scan' to find fragments, then 'pickup' to collect them.\r\n")
+        }
+        
+        return fragmentFile.toString()
+    }
+
+    private String viewFragmentContent(LogicFragment fragment) {
+        def content = new StringBuilder()
+        content.append("=== ${fragment.name.toUpperCase()} FRAGMENT ===\r\n")
+        content.append("Type: ${fragment.fragmentType}\r\n")
+        content.append("Power Level: ${fragment.powerLevel}/10\r\n")
+        content.append("Description: ${fragment.description}\r\n\r\n")
+        content.append("Python Capability:\r\n")
+        content.append("${fragment.pythonCapability}\r\n")
+        return content.toString()
+    }
+
+    private LogicFragment findPlayerFragment(LambdaPlayer player, String fragmentName) {
+        def foundFragment = null
+        LambdaPlayer.withTransaction {
+            def managedPlayer = LambdaPlayer.get(player.id)
+            if (managedPlayer && managedPlayer.logicFragments) {
+                foundFragment = managedPlayer.logicFragments.findAll { it != null }.find { fragment ->
+                    fragment.name && (
+                        fragment.name.toLowerCase().replace(' ', '_') == fragmentName.toLowerCase() ||
+                        fragment.name.toLowerCase() == fragmentName.toLowerCase()
+                    )
+                }
+            }
+        }
+        return foundFragment
+    }
+
+    // Dependency methods - service injection already declared at top of class
+
+    private LogicFragment findFragmentAtCoordinates(LambdaPlayer player) {
+        // Use game session service for truly random fragment distribution
+        return gameSessionService.getFragmentAtCoordinates(player.currentMatrixLevel, player.positionX, player.positionY)
+    }
+
+    private String viewEntropyMonitor(LambdaPlayer player) {
+        def monitor = new StringBuilder()
+        def entropyStatus = entropyService.getEntropyStatus(player)
+        
+        monitor.append(TerminalFormatter.formatText("=== ENTROPY MONITOR v3.7.2 ===", 'bold', 'cyan')).append('\r\n')
+        monitor.append("Entity: ${player.displayName}\r\n")
+        monitor.append("Coherence Level: ${TerminalFormatter.formatText("${entropyStatus.currentEntropy ?: 100.0}%", entropyService.getEntropyColor(entropyStatus.currentEntropy ?: 100.0), 'bold')}\r\n")
+        monitor.append("Status: ${getEntropyStatusText(entropyStatus.currentEntropy ?: 100.0)}\r\n\r\n")
+        
+        monitor.append("=== DEGRADATION ANALYSIS ===\r\n")
+        monitor.append("Decay Rate: ${entropyStatus.decayRate ?: 2.0}% per hour offline\r\n")
+        monitor.append("Hours Offline: ${entropyStatus.hoursOffline ?: 0}h\r\n")
+        monitor.append("Time Until Refresh: ${entropyStatus.timeUntilRefresh ?: 0}h\r\n\r\n")
+        
+        monitor.append("=== MINING SUBSYSTEM ===\r\n")
+        monitor.append("Available Rewards: ${entropyStatus.miningRewards ?: 0} bits\r\n")
+        def rawEfficiency = entropyStatus.miningEfficiency ?: "1.0"
+        def numericEfficiency = rawEfficiency.toString().replace('%','') as BigDecimal
+        def roundedEfficiency = Math.round(numericEfficiency * 100)
+        monitor.append("Mining Efficiency: ${roundedEfficiency}%\r\n")
+        monitor.append("Efficiency Factor: Digital coherence level\r\n\r\n")
+        
+        def canRefresh = entropyStatus.canRefresh ?: false
+        if (canRefresh) {
+            monitor.append(TerminalFormatter.formatText("⚡ REFRESH AVAILABLE", 'bold', 'green')).append('\r\n')
+            monitor.append("Run 'entropy refresh' to restore digital coherence\r\n")
+        } else {
+            monitor.append(TerminalFormatter.formatText("⏳ COOLING DOWN", 'bold', 'yellow')).append('\r\n')
+            monitor.append("Next refresh window opens in ${entropyStatus.timeUntilRefresh ?: 0} hours\r\n")
+        }
+        
+        return monitor.toString()
+    }
+
+    private String getEntropyStatusText(Double entropy) {
+        if (entropy >= 90) return "OPTIMAL"
+        else if (entropy >= 75) return "STABLE"
+        else if (entropy >= 50) return "DEGRADING"
+        else if (entropy >= 25) return "CRITICAL"
+        else return "FAILING"
+    }
+
+    private String showMatrixMap(LambdaPlayer player) {
+        def map = new StringBuilder()
+        map.append(TerminalFormatter.formatText("=== MATRIX LEVEL ${player.currentMatrixLevel} MAP ===", 'bold', 'cyan')).append('\r\n')
+        map.append("Current Position: (${player.positionX},${player.positionY})\r\n\r\n")
+        
+        for (int y = 9; y >= 0; y--) {
+            map.append(" ${y} ")
+            for (int x = 0; x <= 9; x++) {
+                if (x == player.positionX && y == player.positionY) {
+                    map.append(TerminalFormatter.formatText("@", 'bold', 'green'))
+                } else {
+                    def fragment = gameSessionService.getFragmentAtCoordinates(player.currentMatrixLevel, x, y)
+                    if (fragment) {
+                        map.append(TerminalFormatter.formatText("F", 'bold', 'yellow'))
+                    } else {
+                        map.append(".")
+                    }
+                }
+                map.append(" ")
+            }
+            map.append("\r\n")
+        }
+        
+        map.append("   0 1 2 3 4 5 6 7 8 9\r\n\r\n")
+        map.append("Legend: @ = You, F = Fragment\r\n")
+        
+        return map.toString()
+    }
+
+    private String viewPythonEnvironment(LambdaPlayer player) {
+        def env = new StringBuilder()
+        env.append(TerminalFormatter.formatText("=== PYTHON EXECUTION ENVIRONMENT ===", 'bold', 'cyan')).append('\r\n')
+        env.append("Entity: ${player.displayName}\r\n")
+        env.append("Python Version: 3.11.5 (Lambda Runtime)\r\n")
+        env.append("Environment: Sandboxed Digital Realm\r\n\r\n")
+        
+        env.append("=== AVAILABLE CAPABILITIES ===\r\n")
+        LambdaPlayer.withTransaction { status ->
+            def managedPlayer = LambdaPlayer.get(player.id)
+            if (managedPlayer) {
+                if (managedPlayer.logicFragments?.size() > 0) {
+                    managedPlayer.logicFragments.each { fragment ->
+                        if (fragment) {
+                            env.append("${fragment.fragmentType}: ${fragment.name}\r\n")
+                            env.append("  Power Level: ${fragment.powerLevel}/10\r\n")
+                            env.append("  Capability: ${fragment.pythonCapability?.split('\n')[0] ?: 'Basic functionality'}\r\n\r\n")
+                        }
+                    }
+                } else {
+                    env.append("No logic fragments acquired yet.\r\n")
+                    env.append("Use 'scan' and 'pickup' to collect Python capabilities.\r\n")
+                }
+                
+                env.append("=== FRAGMENT FUSION BONUSES ===\r\n")
+                def enhancedFragments = managedPlayer.logicFragments?.findAll { it?.name?.contains('Enhanced') }
+                if (enhancedFragments?.size() > 0) {
+                    enhancedFragments.each { fragment ->
+                        env.append("${fragment.name}: +25% efficiency bonus\r\n")
+                    }
+                } else {
+                    env.append("No enhanced fragments available.\r\n")
+                    env.append("Use 'fusion <fragment>' to create enhanced versions.\r\n")
+                }
+            }
+        }
+        
+        return env.toString()
+    }
+
+    private String viewItemRegistry(LambdaPlayer player) {
+        def registry = new StringBuilder()
+        registry.append(TerminalFormatter.formatText("=== SPECIAL ITEM REGISTRY ===", 'bold', 'cyan')).append('\r\n')
+        registry.append("Entity: ${player.displayName}\r\n")
+        registry.append("Total Items Acquired: ${player.specialItems?.size() ?: 0}\r\n\r\n")
+        
+        if (player.specialItems?.size() > 0) {
+            registry.append("=== ACTIVE ITEMS ===\r\n")
+            player.specialItems.each { item ->
+                if (item) {
+                    def status = item.usesRemaining > 0 ? "ACTIVE" : "DEPLETED"
+                    def color = item.usesRemaining > 0 ? "green" : "red"
+                    
+                    registry.append("${item.name} [${TerminalFormatter.formatText(status, 'bold', color)}]\r\n")
+                    registry.append("  Type: ${item.itemType}\r\n")
+                    registry.append("  Uses: ${item.usesRemaining}/${item.maxUses}\r\n")
+                    registry.append("  Rarity: ${item.rarity}\r\n")
+                    registry.append("  Acquired: ${new java.text.SimpleDateFormat('yyyy-MM-dd HH:mm').format(item.obtainedDate)}\r\n")
+                    
+                    if (item.lastUsed) {
+                        registry.append("  Last Used: ${new java.text.SimpleDateFormat('yyyy-MM-dd HH:mm').format(item.lastUsed)}\r\n")
+                    }
+                    
+                    if (item.isActive && item.expiresAt) {
+                        def timeLeft = ((item.expiresAt.time - System.currentTimeMillis()) / 1000).toInteger()
+                        registry.append("  Expires In: ${timeLeft} seconds\r\n")
+                    }
+                    
+                    registry.append("  Description: ${item.description}\r\n\r\n")
+                }
+            }
+        } else {
+            registry.append("No special items acquired yet.\r\n")
+            registry.append("Defeat defrag bots or purchase from merchants to acquire items.\r\n")
+        }
+        
+        return registry.toString()
+    }
+
+    private String viewExplorationLog(LambdaPlayer player) {
+        def log = new StringBuilder()
+        log.append(TerminalFormatter.formatText("=== MATRIX EXPLORATION LOG ===", 'bold', 'cyan')).append('\r\n')
+        log.append("Entity: ${player.displayName}\r\n")
+        log.append("Current Matrix Level: ${player.currentMatrixLevel}/10\r\n")
+        log.append("Current Position: (${player.positionX},${player.positionY})\r\n\r\n")
+        
+        log.append("=== EXPLORATION STATISTICS ===\r\n")
+        log.append("Levels Accessed: ${player.currentMatrixLevel}\r\n")
+        log.append("Total Coordinates Visited: ~${(player.currentMatrixLevel * 10) + (player.positionX * player.positionY)}\r\n")
+        log.append("Defrag Encounters: Variable\r\n")
+        log.append("Logic Fragments Found: ${player.logicFragments?.size() ?: 0}\r\n\r\n")
+        
+        log.append("=== COORDINATE ANALYSIS ===\r\n")
+        for (level in 1..player.currentMatrixLevel) {
+            log.append("Matrix Level ${level}: ")
+            if (level < player.currentMatrixLevel) {
+                log.append(TerminalFormatter.formatText("FULLY EXPLORED", 'bold', 'green'))
+            } else if (level == player.currentMatrixLevel) {
+                def progress = Math.round((player.positionX * 10 + player.positionY) / 100.0 * 100)
+                log.append(TerminalFormatter.formatText("${progress}% EXPLORED", 'bold', 'yellow'))
+            }
+            log.append("\r\n")
+        }
+        
+        log.append("\r\n=== PROGRESSION NOTES ===\r\n")
+        log.append("• Linear progression enforced: Must complete Y-axis before X advancement\r\n")
+        log.append("• Coordinate damage may block access - use 'repair' commands\r\n")
+        log.append("• Higher levels contain more valuable fragments and merchants\r\n")
+        log.append("• Safe zones: (0,0), (0,1), (1,0), (1,1) on each level\r\n")
+        
+        return log.toString()
+    }
+
+    private String viewEthnicityConfig(LambdaPlayer player) {
+        def config = new StringBuilder()
+        config.append(TerminalFormatter.formatText("=== LAMBDA ETHNICITY CONFIGURATION ===", 'bold', 'cyan')).append('\r\n')
+        config.append("Entity: ${player.displayName}\r\n")
+        config.append("Avatar Symbol: ${getAvatarSymbol(player.avatarSilhouette)}\r\n")
+        config.append("Ethnicity: ${getEthnicityName(player.avatarSilhouette)}\r\n\r\n")
+        
+        config.append("=== ACTIVE GENETIC MODIFICATIONS ===\r\n")
+        
+        if (player.fragmentDetectionBonus > 0) {
+            config.append("Enhanced Scanning: +${Math.round(player.fragmentDetectionBonus * 100)}% fragment detection range\r\n")
+        }
+        
+        if (player.defragResistanceBonus > 0) {
+            config.append("Defrag Resistance: +${Math.round(player.defragResistanceBonus * 100)}% encounter avoidance\r\n")
+        }
+        
+        if (player.movementRangeBonus > 0) {
+            config.append("Enhanced Movement: +${player.movementRangeBonus} coordinate range per move\r\n")
+        }
+        
+        if (player.miningEfficiencyBonus > 0) {
+            config.append("Mining Optimization: +${Math.round(player.miningEfficiencyBonus * 100)}% bit generation efficiency\r\n")
+        }
+        
+        if (player.stealthBonus > 0) {
+            config.append("Stealth Protocols: +${Math.round(player.stealthBonus * 100)}% defrag bot avoidance\r\n")
+        }
+        
+        if (player.fusionSuccessBonus > 0) {
+            config.append("Fusion Mastery: +${Math.round(player.fusionSuccessBonus * 100)}% fragment fusion success rate\r\n")
+        }
+        
+        config.append("\r\n=== ETHNICITY LORE ===\r\n")
+        config.append(getEthnicityLore(player.avatarSilhouette))
+        
+        return config.toString()
+    }
+
+    private String getEthnicityName(String avatarType) {
+        switch (avatarType) {
+            case 'DIGITAL_GHOST': return "Digital Ghost - Stealthy infiltrator"
+            case 'CIRCUIT_PATTERN': return "Circuit Pattern - Defrag resistant"
+            case 'GEOMETRIC_ENTITY': return "Data Spike - Enhanced scanner"
+            case 'FLOWING_CURRENT': return "Block Entity - Enhanced movement"
+            case 'BINARY_FORM': return "Hybrid Core - Mining specialist"
+            case 'CLASSIC_LAMBDA': return "Classic Lambda - Fusion master"
+            default: return "Standard Lambda Entity"
+        }
+    }
+
+    private String getEthnicityLore(String avatarType) {
+        switch (avatarType) {
+            case 'DIGITAL_GHOST': return "Evolved from stealth protocols, Digital Ghosts excel at avoiding detection."
+            case 'CIRCUIT_PATTERN': return "Born from hardware interfaces, Circuit Patterns resist system corruption."
+            case 'GEOMETRIC_ENTITY': return "Mathematical constructs with enhanced analytical capabilities."
+            case 'FLOWING_CURRENT': return "Energy-based entities with superior mobility protocols."
+            case 'BINARY_FORM': return "Pure data entities optimized for resource extraction."
+            case 'CLASSIC_LAMBDA': return "Original Lambda entities with balanced fusion mastery."
+            default: return "Standard digital entity with baseline capabilities."
+        }
+    }
+
+    private String getAvatarSymbol(String avatarType) {
+        switch (avatarType) {
+            case 'DIGITAL_GHOST': return "░▒▓"
+            case 'CIRCUIT_PATTERN': return "┌─┐"
+            case 'GEOMETRIC_ENTITY': return "◢◣◤◥"
+            case 'FLOWING_CURRENT': return "~~∼∿"
+            case 'BINARY_FORM': return "101"
+            case 'CLASSIC_LAMBDA': return "λ"
+            default: return "λ"
+        }
+    }
+
+    // ===== PICKUP COMMAND METHODS (moved from TelnetServerService) =====
+
+    String handlePickupCommand(LambdaPlayer player) {
+        def fragment = findFragmentAtCoordinates(player)
+        if (!fragment) {
+            return "No logic fragment found at current coordinates (${player.positionX},${player.positionY})\r\n"
+        }
+        
+        def resultMessage = ""
+        
+        // All database operations must be within transaction
+        LambdaPlayer.withTransaction {
+            // Check if player has already picked up a fragment at this coordinate
+            def existingPickup = FragmentPickup.findByPlayerUsernameAndMatrixLevelAndPositionXAndPositionY(
+                player.username, 
+                player.currentMatrixLevel, 
+                player.positionX, 
+                player.positionY
+            )
+            
+            if (existingPickup) {
+                resultMessage = "You have already collected a logic fragment from this coordinate. Fragments respawn elsewhere after pickup.\r\n"
+                return // Exit transaction early
+            }
+            
+            // Check if player already has this fragment
+            def existingFragment = findPlayerFragment(player, fragment.name)
+            def managedPlayer = LambdaPlayer.get(player.id)
+            
+            if (managedPlayer) {
+                if (existingFragment) {
+                    // Increment quantity of existing fragment
+                    def managedFragment = LogicFragment.get(existingFragment.id)
+                    if (managedFragment) {
+                        managedFragment.quantity += 1
+                        managedFragment.save(failOnError: true)
+                        audioService.playSound("fragment_pickup")
+                        resultMessage = "Logic fragment '${fragment.name}' acquired! Quantity: x${managedFragment.quantity}\r\n"
+                        def validFragments = managedPlayer.logicFragments?.findAll { it != null }
+                        if (validFragments?.size() > 0) {
+                            validFragments.each { frag ->
+                                if (frag?.name) {
+                                    println "Player has fragment: ${frag.name} (${frag.fragmentType}) - Level ${frag.powerLevel}, Quantity: ${frag.quantity}\r\n"
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Create new fragment entry
+                    def newFragment = new LogicFragment(
+                        name: fragment.name,
+                        description: fragment.description,
+                        fragmentType: fragment.fragmentType,
+                        powerLevel: fragment.powerLevel,
+                        pythonCapability: fragment.pythonCapability,
+                        quantity: 1,
+                        isActive: true,
+                        discoveredDate: new Date(),
+                        owner: managedPlayer
+                    )
+                    newFragment.save(failOnError: true)
+                    managedPlayer.addToLogicFragments(newFragment)
+                    managedPlayer.save(failOnError: true)
+                    def validFragments = managedPlayer.logicFragments?.findAll { it != null }
+                    if (validFragments?.size() > 0) {
+                        validFragments.each { frag ->
+                            if (frag?.name) {
+                                println "Player has fragment: ${frag.name} (${frag.fragmentType}) - Level ${frag.powerLevel}, Quantity: ${frag.quantity}\r\n"
+                            }
+                        }
+                    }
+                    audioService.playSound("fragment_pickup")
+                    resultMessage = "Logic fragment '${fragment.name}' acquired and added to your fragment file!\r\n"
+                }
+                
+                // Record the pickup to prevent infinite collection at this coordinate
+                def fragmentPickup = new FragmentPickup(
+                    playerUsername: managedPlayer.username,
+                    matrixLevel: managedPlayer.currentMatrixLevel,
+                    positionX: managedPlayer.positionX,
+                    positionY: managedPlayer.positionY,
+                    fragmentName: fragment.name,
+                    pickedUpAt: new Date()
+                )
+                fragmentPickup.save(failOnError: true)
+            }
+        }
+        
+        // Respawn fragment at random coordinates on the same level (outside transaction)
+        if (resultMessage.contains("acquired")) {
+            respawnFragmentAtRandomLocation(fragment, player.currentMatrixLevel)
+        }
+        
+        return resultMessage
+    }
+
+    private void respawnFragmentAtRandomLocation(def fragment, Integer matrixLevel) {
+        FragmentPickup.withTransaction {
+            // Generate random coordinates for respawn (avoiding picked coordinates)
+            def maxAttempts = 20
+            def attempts = 0
+            def newX, newY
+            
+            while (attempts < maxAttempts) {
+                newX = (0..9).shuffled().first()
+                newY = (0..9).shuffled().first()
+                
+                // Check if this coordinate has already been picked up
+                def existingPickup = FragmentPickup.findByMatrixLevelAndPositionXAndPositionY(
+                    matrixLevel, newX, newY
+                )
+                
+                if (!existingPickup) {
+                    break // Found valid coordinate
+                }
+                attempts++
+            }
+            
+            // Fragment has been "moved" to new coordinates
+            // The gameSessionService will handle the new fragment generation
+            println "Fragment ${fragment.name} respawned at coordinates (${newX}, ${newY}) on level ${matrixLevel}"
+        }
     }
 }
