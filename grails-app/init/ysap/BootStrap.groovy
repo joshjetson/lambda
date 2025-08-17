@@ -23,6 +23,12 @@ class BootStrap {
 //        bootstrapService.createFirstPage()
         
         println "Lambda: A Digital Entities Game initialized"
+        println "════════════════════════════════════════════════════════════════"
+        println "🎮 LAMBDA GAME SERVER READY"
+        println "📡 Connect via: telnet localhost 23"
+        println "🌐 Web interface: http://localhost:8080 (info only)"
+        println "⚡ A hybrid board/computer game for digital entities"
+        println "════════════════════════════════════════════════════════════════"
     }
     
     def destroy = {
