@@ -178,7 +178,7 @@ class ChatService {
             lambdaPlayerService.setMingleStatus(player, false)
 
             // Broadcast exit message to remaining users
-            output.append("${player.displayName} popped from heapn\r\n")
+            output.append("${player.displayName} popped from heap\r\n")
             this.sendSystemMessage(output.toString())
 
             def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
