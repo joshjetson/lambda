@@ -18,9 +18,6 @@ class TelnetServerService {
     def coordinateStateService
     def elementalSymbolService
     def puzzleService
-    def puzzleRandomizationService
-    def competitivePuzzleService
-    def puzzleKnowledgeTradingService
     def autoDefragService
     def gameSessionService
     def simpleRepairService
@@ -75,31 +72,31 @@ class TelnetServerService {
                 return "Usage: collect_var <variable_name> - Collect hidden variable\r\n"
             },
             'execute': { player, command, parts, writer ->
-                handleExecuteCommand(command, player)
+                puzzleService.handleExecuteCommand(command, player)
             },
             'puzzle_inventory': { player, command, parts, writer ->
-                showPuzzleInventory(player)
+                puzzleService.showPuzzleInventory(player)
             },
             'pinv': { player, command, parts, writer ->
-                showPuzzleInventory(player)
+                puzzleService.showPuzzleInventory(player)
             },
             'puzzle_progress': { player, command, parts, writer ->
-                showCompetitivePuzzleProgress(player)
+                puzzleService.showCompetitivePuzzleProgress(player)
             },
             'pprog': { player, command, parts, writer ->
-                showCompetitivePuzzleProgress(player)
+                puzzleService.showCompetitivePuzzleProgress(player)
             },
             'puzzle_market': { player, command, parts, writer ->
-                showPuzzleKnowledgeMarket(player)
+                puzzleService.showPuzzleKnowledgeMarket(player)
             },
             'pmarket': { player, command, parts, writer ->
-                showPuzzleKnowledgeMarket(player)
+                puzzleService.showPuzzleKnowledgeMarket(player)
             },
             'recurse': { player, command, parts, writer ->
                 if (parts.length > 1) {
-                    return handleRecurseCommand(parts[1], player, writer)
+                    return lambdaPlayerService.handleRecurseCommand(parts[1], player, writer)
                 }
-                return "Usage: recurse <ability> - Use ethnicity recursion power"
+                return "Usage: recurse <ability> - Use ethnicity recursion power\r\n"
             },
             'shop': { player, command, parts, writer ->
                 lambdaMerchantService.handleMerchantCommand(command, player)
@@ -111,25 +108,73 @@ class TelnetServerService {
                 lambdaMerchantService.handleMerchantCommand(command, player)
             },
             'entropy': { player, command, parts, writer ->
-                handleEntropyCommand(command, player, writer)
+                def result = entropyService.handleEntropyCommand(command, player)
+                
+                // Update session if entropy was refreshed
+                if (command.toLowerCase().contains('refresh')) {
+                    LambdaPlayer.withTransaction {
+                        def updatedPlayer = LambdaPlayer.get(player.id)
+                        if (updatedPlayer) {
+                            playerSessions[writer] = updatedPlayer
+                            player.entropy = updatedPlayer.entropy
+                            player.bits = updatedPlayer.bits
+                        }
+                    }
+                }
+                
+                return result
             },
             'mine': { player, command, parts, writer ->
-                handleMiningCommand(player, writer)
+                def result = entropyService.handleMiningCommand(player)
+                
+                // Update session if mining rewards were collected
+                LambdaPlayer.withTransaction {
+                    def updatedPlayer = LambdaPlayer.get(player.id)
+                    if (updatedPlayer) {
+                        playerSessions[writer] = updatedPlayer
+                        player.bits = updatedPlayer.bits
+                        player.entropy = updatedPlayer.entropy
+                    }
+                }
+                
+                return result
             },
             'mining': { player, command, parts, writer ->
-                handleMiningCommand(player, writer)
+                def result = entropyService.handleMiningCommand(player)
+                
+                // Update session if mining rewards were collected
+                LambdaPlayer.withTransaction {
+                    def updatedPlayer = LambdaPlayer.get(player.id)
+                    if (updatedPlayer) {
+                        playerSessions[writer] = updatedPlayer
+                        player.bits = updatedPlayer.bits
+                        player.entropy = updatedPlayer.entropy
+                    }
+                }
+                
+                return result
             },
             'fuse': { player, command, parts, writer ->
-                handleFusionCommand(command, player)
+                entropyService.handleFusionCommand(command, player)
             },
             'fusion': { player, command, parts, writer ->
-                handleFusionCommand(command, player)
+                entropyService.handleFusionCommand(command, player)
             },
             'use': { player, command, parts, writer ->
-                handleUseCommand(command, player)
+                specialItemService.handleUseCommand(command, player)
             },
             'repair': { player, command, parts, writer ->
-                handleRepairCommand(command, player)
+                def result = coordinateStateService.handleRepairCommand(command, player)
+                
+                // Special handling for repair mini-game initiation
+                if (result.startsWith("INITIATE_REPAIR:")) {
+                    def coords = result.split(":")[1].split(",")
+                    def targetX = Integer.parseInt(coords[0])
+                    def targetY = Integer.parseInt(coords[1])
+                    return initiateRepairMiniGame(player, targetX, targetY, writer)
+                }
+                
+                return result
             },
             'map': { player, command, parts, writer ->
                 lambdaPlayerService.showMatrixMap(player)
@@ -635,63 +680,6 @@ class TelnetServerService {
     }
     
 
-    private String handleUseCommand(String command, LambdaPlayer player) {
-        def parts = command.trim().split(' ', 2)
-        if (parts.length < 2) {
-            return showSpecialItemsUsage(player)
-        }
-        
-        def itemName = parts[1]
-        def result = specialItemService.useSpecialItem(player, itemName)
-        
-        if (result.success) {
-            audioService.playSound("special_item_use")
-            def response = new StringBuilder()
-            response.append(TerminalFormatter.formatText("✨ ${result.message}", 'bold', 'green'))
-            
-            // Handle special item effects
-            if (result.scanData) {
-                response.append('\n').append(TerminalFormatter.formatText("📡 SCAN RESULTS:", 'bold', 'cyan'))
-                result.scanData.each { scanLine ->
-                    response.append('\n').append(scanLine)
-                }
-            }
-            
-            if (result.mapData) {
-                response.append('\n').append(TerminalFormatter.formatText("🗺️  MATRIX MAP:", 'bold', 'cyan'))
-                result.mapData.each { mapLine ->
-                    response.append('\n').append(mapLine)
-                }
-            }
-            
-            return response.toString()
-        } else {
-            return TerminalFormatter.formatText("❌ ${result.message}", 'bold', 'red')
-        }
-    }
-    
-    private String showSpecialItemsUsage(LambdaPlayer player) {
-        def items = specialItemService.listPlayerItems(player)
-        def usage = new StringBuilder()
-        
-        usage.append(TerminalFormatter.formatText("=== SPECIAL ITEMS USAGE ===", 'bold', 'cyan')).append('\n')
-        usage.append("Usage: use <item_name>\n\n")
-        
-        if (items) {
-            usage.append("Available Items:\n")
-            items.each { item ->
-                def status = item.usesRemaining > 0 ? "[${item.usesRemaining} uses]" : "[DEPLETED]"
-                def color = item.usesRemaining > 0 ? 'green' : 'red'
-                usage.append("• ${item.name} ${TerminalFormatter.formatText(status, 'bold', color)}\n")
-                usage.append("  ${item.description}\n")
-            }
-        } else {
-            usage.append("No special items in inventory.\n")
-            usage.append("Defeat defrag bots to find special items!\n")
-        }
-        
-        return usage.toString()
-    }
 
     
     // Note: handleCollectSymbolCommand removed - symbols only obtained through puzzle-solving
@@ -774,169 +762,11 @@ class TelnetServerService {
         }
     }
     
-    private String handleMiningCommand(LambdaPlayer player, PrintWriter writer) {
-        def result = entropyService.collectMiningRewards(player)
-        
-        if (result.success) {
-            // Update session player
-            LambdaPlayer.withTransaction {
-                def updatedPlayer = LambdaPlayer.get(player.id)
-                if (updatedPlayer) {
-                    playerSessions[writer] = updatedPlayer
-                    player.bits = updatedPlayer.bits
-                    player.entropy = updatedPlayer.entropy
-                }
-            }
-            
-            def response = new StringBuilder()
-            response.append(TerminalFormatter.formatText("⛏️  MINING OPERATION COMPLETE!", 'bold', 'green')).append('\n')
-            response.append(result.message).append('\n')
-            response.append("Hours Offline: ${result.rewards.hoursOffline}h\n")
-            response.append("Efficiency: ${Math.round(result.rewards.entropyMultiplier * 100)}%\n")
-            if (result.rewards.cappedAt24Hours) {
-                response.append(TerminalFormatter.formatText("⚠️  Mining capped at 24 hours", 'italic', 'yellow'))
-            }
-            
-            return response.toString()
-        } else {
-            return TerminalFormatter.formatText(result.message, 'italic', 'yellow')
-        }
-    }
     
-    private String handleFusionCommand(String command, LambdaPlayer player) {
-        def parts = command.trim().split(' ')
-        if (parts.length < 2) {
-            return showFusionStatus(player)
-        }
-        
-        def fragmentName = parts[1..-1].join(' ')
-        return attemptFragmentFusion(player, fragmentName)
-    }
     
-    private String showFusionStatus(LambdaPlayer player) {
-        def attempts = entropyService.getFragmentFusionAttempts(player)
-        def display = new StringBuilder()
-        
-        display.append(TerminalFormatter.formatText("=== FRAGMENT FUSION STATUS ===", 'bold', 'cyan')).append('\n')
-        display.append("Daily Attempts: ${attempts.used}/${attempts.max}\n")
-        display.append("Remaining: ${TerminalFormatter.formatText("${attempts.remaining}", 'bold', attempts.remaining > 0 ? 'green' : 'red')}\n\n")
-        display.append("Usage: fusion <fragment_name>\n")
-        display.append("Requires: 3+ identical fragments\n")
-        display.append("Success Rate: Variable (higher with more fragments)\n\n")
-        
-        // Show fusible fragments
-        def fusibleFragments = findFusibleFragments(player)
-        if (fusibleFragments) {
-            display.append("Available for Fusion:\n")
-            fusibleFragments.each { fragment ->
-                display.append("• ${fragment.name} x${fragment.quantity}\n")
-            }
-        } else {
-            display.append("No fragments available for fusion\n")
-        }
-        
-        return display.toString()
-    }
-    
-    private String attemptFragmentFusion(LambdaPlayer player, String fragmentName) {
-        def attempts = entropyService.getFragmentFusionAttempts(player)
-        if (attempts.remaining <= 0) {
-            return TerminalFormatter.formatText("No fusion attempts remaining today", 'bold', 'red')
-        }
-        
-        // Find fragment to fuse
-        def targetFragment = findPlayerFragment(player, fragmentName)
-        if (!targetFragment || targetFragment.quantity < 3) {
-            return "Need at least 3 identical fragments to attempt fusion"
-        }
-        
-        // Calculate success rate based on quantity and ethnicity bonus
-        def baseSuccessRate = 30  // 30% base
-        def bonusRate = (targetFragment.quantity - 3) * 10  // +10% per extra fragment
-        def ethnicityBonus = (player.fusionSuccessBonus ?: 0.0) * 100  // Binary Form +15%
-        def successRate = Math.min(95, baseSuccessRate + bonusRate + ethnicityBonus)  // Cap at 95%
-        
-        def success = Math.random() * 100 < successRate
-        
-        // Update player
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            def managedFragment = managedPlayer.logicFragments.find { it.id == targetFragment.id }
-            
-            if (managedFragment && managedPlayer) {
-                managedPlayer.fusionAttempts += 1
-                
-                if (success) {
-                    // Success: Remove 3 fragments, create 1 enhanced version
-                    managedFragment.quantity -= 3
-                    
-                    // Create enhanced version regardless of remaining quantity
-                    def enhancedFragment = new LogicFragment(
-                        name: "${managedFragment.name} Enhanced",
-                        description: "Fused variant with improved capabilities",
-                        fragmentType: managedFragment.fragmentType,
-                        powerLevel: Math.min(10, managedFragment.powerLevel + 1),
-                        pythonCapability: enhanceFragmentCapability(managedFragment.pythonCapability),
-                        quantity: 1,
-                        isActive: true,
-                        discoveredDate: new Date(),
-                        owner: managedPlayer
-                    )
-                    enhancedFragment.save(failOnError: true)
-                    managedPlayer.addToLogicFragments(enhancedFragment)
-                    
-                    // Remove original if quantity is now 0
-                    if (managedFragment.quantity <= 0) {
-                        managedPlayer.removeFromLogicFragments(managedFragment)
-                        managedFragment.delete()
-                    } else {
-                        managedFragment.save(failOnError: true)
-                    }
-                } else {
-                    // Failure: Lose 1 fragment
-                    managedFragment.quantity -= 1
-                    if (managedFragment.quantity <= 0) {
-                        managedPlayer.removeFromLogicFragments(managedFragment)
-                        managedFragment.delete()
-                    } else {
-                        managedFragment.save(failOnError: true)
-                    }
-                }
-                
-                managedPlayer.save(failOnError: true)
-            }
-        }
-        
-        def response = new StringBuilder()
-        if (success) {
-            audioService.playSound("fusion_success")
-            response.append(TerminalFormatter.formatText("✨ FUSION SUCCESS!", 'bold', 'green')).append('\n')
-            response.append("Created enhanced ${fragmentName} with +1 power level!")
-        } else {
-            audioService.playSound("fusion_fail")
-            response.append(TerminalFormatter.formatText("💥 Fusion Failed", 'bold', 'red')).append('\n')
-            response.append("Lost 1 fragment in the process. Better luck next time!")
-        }
-        response.append("\nFusion attempts remaining: ${attempts.remaining - 1}")
-        
-        return response.toString()
-    }
     
 
-    private List findFusibleFragments(LambdaPlayer player) {
-        def fragments = []
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (managedPlayer?.logicFragments) {
-                fragments = managedPlayer.logicFragments.findAll { it != null && it.quantity >= 3 }
-            }
-        }
-        return fragments
-    }
     
-    private String enhanceFragmentCapability(String originalCapability) {
-        return "${originalCapability}\n\n# Enhanced fusion variant with 25% improved efficiency"
-    }
     
     
     private String viewFragmentFile(LambdaPlayer player) {
@@ -987,21 +817,6 @@ class TelnetServerService {
         return content.toString()
     }
     
-    private LogicFragment findPlayerFragment(LambdaPlayer player, String fragmentName) {
-        def foundFragment = null
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (managedPlayer && managedPlayer.logicFragments) {
-                foundFragment = managedPlayer.logicFragments.findAll { it != null }.find { fragment ->
-                    fragment.name && (
-                        fragment.name.toLowerCase().replace(' ', '_') == fragmentName.toLowerCase() ||
-                        fragment.name.toLowerCase() == fragmentName.toLowerCase()
-                    )
-                }
-            }
-        }
-        return foundFragment
-    }
     
     
     private List<String> scanExtendedFragmentRange(LambdaPlayer player) {
@@ -1046,164 +861,10 @@ class TelnetServerService {
 
 
 
-    private String handleRepairCommand(String command, LambdaPlayer player) {
-        def parts = command.trim().split(' ')
-        
-        if (parts.length == 1) {
-            return showRepairOptions(player)
-        }
-        
-        if (parts.length == 3) {
-            // repair <x> <y> - Initiate repair mini-game for specific adjacent coordinate
-            try {
-                def targetX = Integer.parseInt(parts[1])
-                def targetY = Integer.parseInt(parts[2])
-                return initiateRepairMiniGame(player, targetX, targetY, playerSessions.find { it.value?.id == player.id }?.key)
-            } catch (NumberFormatException e) {
-                return "Invalid coordinates. Usage: repair <x> <y>"
-            }
-        }
-        
-        def subCommand = parts[1].toLowerCase()
-        
-        switch (subCommand) {
-            case 'status':
-                return showAreaRepairStatus(player)
-            case 'scan':
-                return showRepairableCoordinates(player)
-            case 'help':
-                return showRepairHelp()
-            default:
-                return "Unknown repair command. Use 'repair help' for available commands."
-        }
-    }
     
-    private String showRepairOptions(LambdaPlayer player) {
-        def repair = new StringBuilder()
-        repair.append(TerminalFormatter.formatText("=== COORDINATE REPAIR SYSTEM ===", 'bold', 'cyan')).append('\n')
-        
-        def coordinateHealth = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, player.positionX, player.positionY)
-        repair.append("Current Position: (${player.positionX},${player.positionY})\n")
-        repair.append("Health: ${TerminalFormatter.formatText("${coordinateHealth.health}%", 'bold', coordinateHealth.color)} - ${coordinateHealth.status}\n\n")
-        
-        // Show repairable adjacent coordinates
-        def repairableCoords = coordinateStateService.getRepairableCoordinatesForPlayer(player)
-        if (repairableCoords.size() > 0) {
-            repair.append(TerminalFormatter.formatText("🔧 ADJACENT WIPED COORDINATES:", 'bold', 'red')).append('\n')
-            repairableCoords.each { coord ->
-                def dateStr = coord.lastDamaged ? new java.text.SimpleDateFormat('HH:mm').format(coord.lastDamaged) : 'Unknown'
-                repair.append("  (${coord.x},${coord.y}) - ${coord.status} - Destroyed at ${dateStr}\n")
-            }
-            repair.append('\n')
-        } else {
-            repair.append(TerminalFormatter.formatText("✅ No adjacent coordinates need repair", 'bold', 'green')).append('\n\n')
-        }
-        
-        repair.append("Available Commands:\n")
-        repair.append("repair scan - Show all adjacent repairable coordinates\n")
-        repair.append("repair <x> <y> - Repair specific adjacent coordinate\n")
-        repair.append("repair status - Show area repair status\n")
-        repair.append("repair help - Show detailed repair help\n\n")
-        
-        if (repairableCoords.size() > 0) {
-            repair.append(TerminalFormatter.formatText("💡 TIP:", 'bold', 'yellow'))
-                .append(" Use 'repair <x> <y>' to fix adjacent wiped coordinates\n")
-            repair.append("Example: repair ${repairableCoords[0].x} ${repairableCoords[0].y}")
-        }
-        
-        return repair.toString()
-    }
     
-    private String showAreaRepairStatus(LambdaPlayer player) {
-        def repair = new StringBuilder()
-        repair.append(TerminalFormatter.formatText("=== AREA REPAIR STATUS ===", 'bold', 'cyan')).append('\n')
-        
-        def damaged = []
-        def critical = []
-        def wiped = []
-        
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dy = -2; dy <= 2; dy++) {
-                def scanX = Math.max(0, Math.min(9, player.positionX + dx))
-                def scanY = Math.max(0, Math.min(9, player.positionY + dy))
-                def health = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, scanX, scanY)
-                
-                def distance = Math.round(Math.sqrt(dx * dx + dy * dy) * 10) / 10
-                def coordInfo = "(${scanX},${scanY}) - ${health.health}% [Dist: ${distance}]"
-                
-                if (health.health <= 0) {
-                    wiped.add(coordInfo)
-                } else if (health.health <= 25) {
-                    critical.add(coordInfo)
-                } else if (health.health < 100) {
-                    damaged.add(coordInfo)
-                }
-            }
-        }
-        
-        if (wiped) {
-            repair.append(TerminalFormatter.formatText("🔴 WIPED COORDINATES:", 'bold', 'red')).append('\n')
-            wiped.each { repair.append("  ${it}\n") }
-            repair.append('\n')
-        }
-        
-        if (critical) {
-            repair.append(TerminalFormatter.formatText("🟡 CRITICAL COORDINATES:", 'bold', 'yellow')).append('\n')
-            critical.each { repair.append("  ${it}\n") }
-            repair.append('\n')
-        }
-        
-        if (damaged) {
-            repair.append(TerminalFormatter.formatText("🟠 DAMAGED COORDINATES:", 'bold', 'cyan')).append('\n')
-            damaged.each { repair.append("  ${it}\n") }
-            repair.append('\n')
-        }
-        
-        if (!wiped && !critical && !damaged) {
-            repair.append(TerminalFormatter.formatText("✅ All coordinates in area are operational!", 'bold', 'green'))
-        }
-        
-        return repair.toString()
-    }
     
-    private String repairCurrentCoordinate(LambdaPlayer player) {
-        def coordinateHealth = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, player.positionX, player.positionY)
-        
-        if (coordinateHealth.health >= 100) {
-            return TerminalFormatter.formatText("Current coordinate is already at full operational capacity.", 'bold', 'green')
-        }
-        
-        // Create a Linux-based repair challenge
-        def challenge = new StringBuilder()
-        challenge.append(TerminalFormatter.formatText("🔧 COORDINATE REPAIR INITIATED", 'bold', 'cyan')).append('\n')
-        challenge.append("Coordinate (${player.positionX},${player.positionY}) Health: ${coordinateHealth.health}%\n\n")
-        
-        challenge.append("System corruption detected. Execute repair sequence:\n")
-        challenge.append("1. Check filesystem integrity: ${TerminalFormatter.formatText('fsck -y /matrix/level${player.currentMatrixLevel}/coord_${player.positionX}_${player.positionY}', 'bold', 'white')}\n")
-        challenge.append("2. Clear temp files: ${TerminalFormatter.formatText('rm -rf /tmp/defrag_damage/*', 'bold', 'white')}\n")
-        challenge.append("3. Restart services: ${TerminalFormatter.formatText('systemctl restart matrix-coordinator', 'bold', 'white')}\n")
-        challenge.append("4. Verify repair: ${TerminalFormatter.formatText('systemctl status matrix-coordinator', 'bold', 'white')}\n\n")
-        
-        // Actually perform the repair
-        def repairAmount = Math.min(100 - coordinateHealth.health, 25) // Repair 25 points at a time
-        coordinateStateService.repairCoordinate(player.currentMatrixLevel, player.positionX, player.positionY, repairAmount)
-        
-        def newHealth = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, player.positionX, player.positionY)
-        challenge.append(TerminalFormatter.formatText("✅ REPAIR SUCCESSFUL", 'bold', 'green')).append('\n')
-        challenge.append("Coordinate health: ${coordinateHealth.health}% → ${TerminalFormatter.formatText("${newHealth.health}%", 'bold', 'green')}\n")
-        
-        if (newHealth.health < 100) {
-            challenge.append("Coordinate still needs additional repair. Repeat command to continue.")
-        } else {
-            challenge.append("Coordinate fully restored to operational status!")
-        }
-        
-        return challenge.toString()
-    }
     
-    private String startRepairChallenge(LambdaPlayer player) {
-        return TerminalFormatter.formatText("🚧 Advanced repair challenges coming soon! Use 'repair current' for basic repairs.", 'italic', 'yellow')
-    }
     
     private String initiateRepairMiniGame(LambdaPlayer player, Integer targetX, Integer targetY, PrintWriter writer) {
         // Stop any existing repair session for this player
@@ -1221,72 +882,7 @@ class TelnetServerService {
         }
     }
     
-    private String showRepairableCoordinates(LambdaPlayer player) {
-        def repair = new StringBuilder()
-        repair.append(TerminalFormatter.formatText("=== REPAIRABLE COORDINATES SCAN ===", 'bold', 'cyan')).append('\n')
-        repair.append("Your Position: (${player.positionX},${player.positionY})\n\n")
-        
-        def repairableCoords = coordinateStateService.getRepairableCoordinatesForPlayer(player)
-        
-        if (repairableCoords.size() > 0) {
-            repair.append(TerminalFormatter.formatText("🔧 ADJACENT WIPED COORDINATES (Repairable):", 'bold', 'red')).append('\n')
-            repairableCoords.each { coord ->
-                def dateStr = coord.lastDamaged ? new java.text.SimpleDateFormat('HH:mm:ss').format(coord.lastDamaged) : 'Unknown'
-                repair.append("  (${coord.x},${coord.y}) - Status: ${coord.status} - Destroyed: ${dateStr}\n")
-                repair.append("    Command: ${TerminalFormatter.formatText("repair ${coord.x} ${coord.y}", 'bold', 'white')}\n")
-            }
-            repair.append('\n')
-            repair.append(TerminalFormatter.formatText("⚠️  WARNING:", 'bold', 'yellow'))
-                .append(" Wiped coordinates may contain valuable logic fragments or elemental symbols!\n")
-            repair.append("Repair them to access their contents and ensure game progression.")
-        } else {
-            repair.append(TerminalFormatter.formatText("✅ No adjacent coordinates need repair", 'bold', 'green')).append('\n')
-            repair.append("All surrounding coordinates are operational.")
-        }
-        
-        return repair.toString()
-    }
     
-    private String showRepairHelp() {
-        def help = new StringBuilder()
-        help.append(TerminalFormatter.formatText("=== REPAIR COMMAND HELP ===", 'bold', 'cyan')).append('\n\n')
-        
-        help.append(TerminalFormatter.formatText("COORDINATE REPAIR SYSTEM:", 'bold', 'white')).append('\n')
-        help.append("Auto-defrag bots destroy coordinates every minute. When coordinates\n")
-        help.append("are wiped, they may contain valuable logic fragments or elemental\n")
-        help.append("symbols needed for game progression.\n\n")
-        
-        help.append(TerminalFormatter.formatText("COMMANDS:", 'bold', 'white')).append('\n')
-        help.append("repair - Show repair options and adjacent wiped coordinates\n")
-        help.append("repair scan - Detailed scan of all repairable coordinates\n")
-        help.append("repair <x> <y> - Start repair mini-game for specific coordinate\n")
-        help.append("repair status - Show area repair status in 5x5 grid\n")
-        help.append("repair help - Show this help\n\n")
-        
-        help.append(TerminalFormatter.formatText("REPAIR MINI-GAME:", 'bold', 'yellow')).append('\n')
-        help.append("• High-value coordinates require 4-digit repair codes\n")
-        help.append("• Standard coordinates require 3-digit repair codes\n")
-        help.append("• Numbers cycle 0-9 with increasing speed for each digit\n")
-        help.append("• Press SPACE BAR to lock in each digit when it shows the correct number\n")
-        help.append("• Match the target repair code exactly to succeed\n")
-        help.append("• Failed attempts require starting over with a new random code\n\n")
-        
-        help.append(TerminalFormatter.formatText("REPAIR RULES:", 'bold', 'white')).append('\n')
-        help.append("• You can only repair coordinates adjacent to your position\n")
-        help.append("• You must be on a functional coordinate to perform repairs\n")
-        help.append("• Wiped coordinates (0% health) are inaccessible until repaired\n")
-        help.append("• Repaired coordinates restore to 100% health\n\n")
-        
-        help.append(TerminalFormatter.formatText("EXAMPLES:", 'bold', 'white')).append('\n')
-        help.append("repair 3 4    # Repair coordinate (3,4) if adjacent to you\n")
-        help.append("repair scan   # Show all coordinates you can repair\n\n")
-        
-        help.append(TerminalFormatter.formatText("⚠️  IMPORTANT:", 'bold', 'yellow'))
-            .append(" Auto-defrag bots destroy coordinates every minute!\n")
-        help.append("Repair wiped coordinates quickly to prevent progression blocks.")
-        
-        return help.toString()
-    }
     
     private String showAutoDefragStatus() {
         def status = autoDefragService.getAutoDefragStatus()
@@ -1689,70 +1285,6 @@ class TelnetServerService {
         return "SYSTEM_FAILURE_IMMINENT"
     }
     
-    private String handleRecurseCommand(String ability, LambdaPlayer player, PrintWriter writer) {
-        // Check if player has recursion charges available
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (!managedPlayer) {
-                return "Player not found"
-            }
-            
-            // Check recursion cooldown and charges (TODO: implement tracking fields)
-            // For now, return a placeholder implementation
-            def ethnicity = managedPlayer.avatarSilhouette
-            
-            switch (ability.toLowerCase()) {
-                case 'movement':
-                    if (ethnicity == 'GEOMETRIC_ENTITY') {
-                        return handleRecursiveMovement(managedPlayer, writer)
-                    }
-                    return "Movement recursion not available for your ethnicity"
-                    
-                case 'fusion':
-                    if (ethnicity == 'CLASSIC_LAMBDA') {
-                        return "Fusion recursion activated - next fragment fusion has +15% success rate"
-                    }
-                    return "Fusion recursion not available for your ethnicity"
-                    
-                case 'defend':
-                    if (ethnicity == 'CIRCUIT_PATTERN') {
-                        return "Defense recursion activated - next defrag encounter has +15% resistance"
-                    }
-                    return "Defense recursion not available for your ethnicity"
-                    
-                case 'mine':
-                    if (ethnicity == 'FLOWING_CURRENT') {
-                        return "Mining recursion activated - next mining cycle has +25% efficiency"
-                    }
-                    return "Mining recursion not available for your ethnicity"
-                    
-                case 'stealth':
-                    if (ethnicity == 'DIGITAL_GHOST') {
-                        return "Stealth recursion activated - enhanced defrag avoidance for 10 minutes"
-                    }
-                    return "Stealth recursion not available for your ethnicity"
-                    
-                case 'process':
-                    if (ethnicity == 'BINARY_FORM') {
-                        return "Processing recursion activated - cooldowns reduced for 5 minutes"
-                    }
-                    return "Processing recursion not available for your ethnicity"
-                    
-                default:
-                    return "Unknown recursion ability. Available: movement, fusion, defend, mine, stealth, process"
-            }
-        }
-    }
-    
-    private String handleRecursiveMovement(LambdaPlayer player, PrintWriter writer) {
-        // Enhanced movement allows 2-3 coordinate jump
-        writer.println("Enhanced movement mode activated!")
-        writer.print("Enter target coordinates for recursive movement (x,y): ")
-        writer.flush()
-        
-        // TODO: Implement proper input handling for recursive movement
-        return "Recursive movement ready - next cc command will jump 2-3 coordinates"
-    }
     
     
     // ============ PUZZLE SYSTEM COMMAND HANDLERS ============
@@ -1805,172 +1337,9 @@ execute --<flag> <nonce> ${filename}"""
         }
     }
     
-    private String handleExecuteCommand(String command, LambdaPlayer player) {
-        def parts = command.trim().split(' ')
-        
-        // Check if this is a puzzle room execution: execute --flag nonce filename
-        if (parts.length == 4 && parts[1].startsWith('--')) {
-            def flag = parts[1]
-            def nonce = parts[2]
-            def filename = parts[3]
-            
-            // Check if file exists and is executable at current location
-            def puzzleElements = puzzleService.getPlayerPuzzleElementsAtLocation(player, player.positionX, player.positionY)
-            def puzzleRooms = puzzleElements.findAll { it.type == 'player_puzzle_room' }
-            def targetRoom = puzzleRooms.find { it.data.fileName == filename }
-            
-            if (!targetRoom) {
-                audioService.playSound("error_sound")
-                return "${TerminalFormatter.formatText('❌ File Not Found', 'bold', 'red')}\nNo file named '${filename}' at current location.\nUse 'ls' to see available files."
-            }
-            
-            if (!targetRoom.data.isExecutable) {
-                audioService.playSound("error_sound")
-                return """${TerminalFormatter.formatText('❌ Permission Denied', 'bold', 'red')}
-File '${filename}' is not executable.
-
-${TerminalFormatter.formatText('💡 SOLUTION:', 'bold', 'yellow')} Make the file executable first:
-chmod +x ${filename}
-
-Then retry your execute command."""
-            }
-            
-            def result = puzzleService.executePuzzleRoom(player, flag, nonce, filename)
-            if (result.success) {
-                audioService.playSound("victory_chord")
-                def response = new StringBuilder()
-                response.append("${TerminalFormatter.formatText('🏆 PUZZLE SOLVED!', 'bold', 'green')}\n")
-                response.append("${result.message}\n")
-                
-                if (result.triggerShift) {
-                    response.append("\n${TerminalFormatter.formatText('⚡ COORDINATE SHIFT TRIGGERED!', 'bold', 'yellow')}\n")
-                    response.append("${TerminalFormatter.formatText('Other players\' coordinates have been randomized!', 'bold', 'cyan')}\n")
-                    response.append("${TerminalFormatter.formatText('Competition intensifies! 🔥', 'italic', 'red')}\n")
-                }
-                
-                return response.toString()
-            } else {
-                audioService.playSound("error_sound")
-                return "${TerminalFormatter.formatText('❌ Execution Failed', 'bold', 'red')}\n${result.message}"
-            }
-        }
-        
-        // Check if this is a logic fragment execution: execute <fragment_name> [variable_value]
-        if (parts.length >= 2) {
-            def fragmentName = parts[1]
-            def inputVariable = parts.length > 2 ? parts[2] : null
-            
-            def result = puzzleService.executePuzzleFragment(player, fragmentName, inputVariable)
-            if (result.success) {
-                audioService.playSound("fragment_pickup")
-                def output = new StringBuilder()
-                output.append("${TerminalFormatter.formatText('🧩 FRAGMENT EXECUTED!', 'bold', 'cyan')}\n")
-                output.append("${result.message}\n")
-                output.append("${TerminalFormatter.formatText('OUTPUT:', 'bold', 'white')} ${result.output}\n")
-                
-                // Check if output contains coordinates
-                if (result.output?.contains(':')) {
-                    output.append("${TerminalFormatter.formatText('💡 TIP:', 'bold', 'yellow')} Output may contain coordinate information!\n")
-                }
-                
-                return output.toString()
-            } else {
-                return "${TerminalFormatter.formatText('❌ Execution Failed', 'bold', 'red')}\n${result.message}"
-            }
-        }
-        
-        return """${TerminalFormatter.formatText('EXECUTE COMMAND USAGE:', 'bold', 'cyan')}
-
-${TerminalFormatter.formatText('Puzzle Room Execution:', 'bold', 'white')}
-  execute --<flag> <nonce> <filename>
-  Example: execute --electrical 7e4a92f1b3d5c8e9 electrical_unlock.py
-
-${TerminalFormatter.formatText('Logic Fragment Execution:', 'bold', 'white')}
-  execute <fragment_name> [variable_value]
-  Example: execute "Electrical Analyzer" 12.0,5.0,3.3
-
-${TerminalFormatter.formatText('💡 TIP:', 'bold', 'yellow')} Use 'pinv' to see your puzzle inventory"""
-    }
     
-    private String showPuzzleInventory(LambdaPlayer player) {
-        def inventory = puzzleService.getPlayerPuzzleInventory(player)
-        def output = new StringBuilder()
-        
-        output.append(TerminalFormatter.formatText("=== 🧩 PUZZLE INVENTORY ===", 'bold', 'cyan')).append('\n\n')
-        
-        // Puzzle Logic Fragments
-        output.append(TerminalFormatter.formatText("PUZZLE LOGIC FRAGMENTS:", 'bold', 'purple')).append('\n')
-        if (inventory.puzzleFragments.size() > 0) {
-            inventory.puzzleFragments.each { fragment ->
-                output.append("  🧩 ${fragment.name} (${fragment.type} Level ${fragment.powerLevel})\n")
-                output.append("     ${fragment.hint}\n")
-            }
-        } else {
-            output.append("  No puzzle fragments acquired\n")
-        }
-        
-        output.append('\n')
-        
-        // Hidden Variables
-        output.append(TerminalFormatter.formatText("COLLECTED VARIABLES:", 'bold', 'green')).append('\n')
-        if (inventory.variables.size() > 0) {
-            inventory.variables.each { variable ->
-                output.append("  📦 ${variable.name} = ${variable.value} (${variable.type})\n")
-                output.append("     ${variable.hint}\n")
-            }
-        } else {
-            output.append("  No variables collected\n")
-        }
-        
-        output.append('\n')
-        
-        // Elemental Nonces
-        output.append(TerminalFormatter.formatText("DISCOVERED NONCES:", 'bold', 'yellow')).append('\n')
-        if (inventory.nonces.size() > 0) {
-            inventory.nonces.each { nonce ->
-                output.append("  🔑 ${nonce.name} (${nonce.element})\n")
-                output.append("     ${nonce.clue}\n")
-                output.append("     Flag: ${nonce.flag}\n")
-            }
-        } else {
-            output.append("  No nonces discovered\n")
-        }
-        
-        // Recent Executions
-        if (inventory.recentExecutions.size() > 0) {
-            output.append('\n')
-            output.append(TerminalFormatter.formatText("RECENT EXECUTIONS:", 'bold', 'white')).append('\n')
-            inventory.recentExecutions.each { execution ->
-                output.append("  ⚡ ${execution.summary}\n")
-            }
-        }
-        
-        output.append('\n')
-        output.append(TerminalFormatter.formatText("💡 COMMANDS:", 'bold', 'cyan')).append('\n')
-        output.append("  execute <fragment> [variable] - Execute puzzle logic\n")
-        output.append("  execute --<flag> <nonce> <file> - Unlock elemental symbols\n")
-        output.append("  collect_var <name> - Collect hidden variables\n")
-        output.append("  pprog - Show competitive puzzle progress\n")
-        output.append("  pmarket - Show tradeable puzzle knowledge\n")
-        output.append("  scan - Detect puzzle elements at your location\n")
-        
-        return output.toString()
-    }
     
-    private String showCompetitivePuzzleProgress(LambdaPlayer player) {
-        def session = puzzleRandomizationService.getCurrentGameSession()
-        if (!session) {
-            return "No active game session found."
-        }
-        
-        return competitivePuzzleService.formatPlayerProgressDisplay(
-            player, session.sessionId, player.currentMatrixLevel
-        )
-    }
     
-    private String showPuzzleKnowledgeMarket(LambdaPlayer player) {
-        return puzzleKnowledgeTradingService.formatTradeablePuzzleKnowledge(player)
-    }
     
     private void saveCommandToHistory(LambdaPlayer player, String command) {
         try {

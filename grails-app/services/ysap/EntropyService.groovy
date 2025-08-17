@@ -7,6 +7,8 @@ import groovy.json.JsonSlurper
 @Transactional
 class EntropyService {
 
+    def audioService
+
     String getEntropyColor(Double entropy) {
         def safeEntropy = entropy ?: 100.0
         if (safeEntropy >= 75) return 'green'
@@ -232,5 +234,249 @@ class EntropyService {
             max: maxAttempts,
             remaining: Math.max(0, maxAttempts - fusionAttempts)
         ]
+    }
+
+    // ===== ENTROPY COMMAND HANDLERS (moved from TelnetServerService) =====
+
+    String handleEntropyCommand(String command, LambdaPlayer player) {
+        def parts = command.trim().split(' ')
+        def subCommand = parts.length > 1 ? parts[1].toLowerCase() : "status"
+        
+        switch (subCommand) {
+            case 'status':
+            case 'check':
+                return showEntropyStatus(player)
+            case 'refresh':
+            case 'restore':
+                return refreshEntropy(player)
+            default:
+                return "Usage: entropy [status|refresh]\r\n"
+        }
+    }
+    
+    private String showEntropyStatus(LambdaPlayer player) {
+        def status = this.getEntropyStatus(player)
+        def display = new StringBuilder()
+        
+        // Safe extraction of values with defaults
+        def currentEntropy = status.currentEntropy ?: 100.0
+        def hoursOffline = status.hoursOffline ?: 0
+        def miningRewards = status.miningRewards ?: 0
+        def miningEfficiency = status.miningEfficiency ?: "100%"
+        def canRefresh = status.canRefresh ?: false
+        def timeUntilRefresh = status.timeUntilRefresh ?: 0
+        def decayRate = status.entropyDecayRate ?: "2% per hour"
+        
+        display.append(TerminalFormatter.formatText("=== DIGITAL ENTROPY STATUS ===", 'bold', 'cyan')).append('\r\n')
+        display.append("Entity: ${player.displayName}\r\n")
+        display.append("Current Coherence: ${TerminalFormatter.formatText("${currentEntropy}%", this.getEntropyColor(currentEntropy), 'bold')}\r\n")
+        display.append("Hours Offline: ${hoursOffline}\r\n")
+        display.append("Decay Rate: ${decayRate}\r\n\r\n")
+        
+        display.append("Mining Status:\r\n")
+        display.append("Available Rewards: ${TerminalFormatter.formatText("${miningRewards} bits", 'bold', 'green')}\r\n")
+        display.append("Mining Efficiency: ${miningEfficiency}\r\n\r\n")
+        
+        if (canRefresh) {
+            display.append(TerminalFormatter.formatText("✅ Entropy refresh available! Use 'entropy refresh'", 'bold', 'green'))
+        } else {
+            display.append(TerminalFormatter.formatText("⏳ Next refresh in ${timeUntilRefresh} hours", 'italic', 'yellow'))
+        }
+        
+        if (currentEntropy < 25) {
+            display.append('\r\n').append(TerminalFormatter.formatText("⚠️  CRITICAL: Digital coherence failing! Refresh immediately!", 'bold', 'red'))
+        }
+        
+        return display.toString()
+    }
+    
+    private String refreshEntropy(LambdaPlayer player) {
+        def result = this.refreshPlayerEntropy(player)
+        
+        if (result.success) {
+            def response = new StringBuilder()
+            audioService.playSound("entropy_refresh")
+            response.append(TerminalFormatter.formatText("🔋 ENTROPY RESTORED!", 'bold', 'green')).append('\r\n')
+            response.append(result.message).append('\r\n')
+            response.append("Daily Login Bonus: ${TerminalFormatter.formatText("+${result.rewards.bits} bits", 'bold', 'yellow')}")
+            
+            return response.toString()
+        } else {
+            return TerminalFormatter.formatText(result.message, 'italic', 'yellow')
+        }
+    }
+
+    // ===== MINING COMMAND HANDLER (moved from TelnetServerService) =====
+
+    String handleMiningCommand(LambdaPlayer player) {
+        def result = this.collectMiningRewards(player)
+        
+        if (result.success) {
+            audioService.playSound("bits_earned")
+            def response = new StringBuilder()
+            response.append(TerminalFormatter.formatText("⛏️  MINING OPERATION COMPLETE!", 'bold', 'green')).append('\r\n')
+            response.append(result.message).append('\r\n')
+            response.append("Hours Offline: ${result.rewards.hoursOffline}h\r\n")
+            response.append("Efficiency: ${Math.round(result.rewards.entropyMultiplier * 100)}%\r\n")
+            if (result.rewards.cappedAt24Hours) {
+                response.append(TerminalFormatter.formatText("⚠️  Mining capped at 24 hours", 'italic', 'yellow'))
+            }
+            
+            return response.toString()
+        } else {
+            return TerminalFormatter.formatText(result.message, 'italic', 'yellow')
+        }
+    }
+
+    // ===== FUSION COMMAND HANDLERS (moved from TelnetServerService) =====
+
+    String handleFusionCommand(String command, LambdaPlayer player) {
+        def parts = command.trim().split(' ')
+        if (parts.length < 2) {
+            return showFusionStatus(player)
+        }
+        
+        def fragmentName = parts[1..-1].join(' ')
+        return attemptFragmentFusion(player, fragmentName)
+    }
+    
+    private String showFusionStatus(LambdaPlayer player) {
+        def attempts = this.getFragmentFusionAttempts(player)
+        def display = new StringBuilder()
+        
+        display.append(TerminalFormatter.formatText("=== FRAGMENT FUSION STATUS ===", 'bold', 'cyan')).append('\r\n')
+        display.append("Daily Attempts: ${attempts.used}/${attempts.max}\r\n")
+        display.append("Remaining: ${TerminalFormatter.formatText("${attempts.remaining}", 'bold', attempts.remaining > 0 ? 'green' : 'red')}\r\n\r\n")
+        display.append("Usage: fusion <fragment_name>\r\n")
+        display.append("Requires: 3+ identical fragments\r\n")
+        display.append("Success Rate: Variable (higher with more fragments)\r\n\r\n")
+        
+        // Show fusible fragments
+        def fusibleFragments = findFusibleFragments(player)
+        if (fusibleFragments) {
+            display.append("Available for Fusion:\r\n")
+            fusibleFragments.each { fragment ->
+                display.append("• ${fragment.name} x${fragment.quantity}\r\n")
+            }
+        } else {
+            display.append("No fragments available for fusion\r\n")
+        }
+        
+        return display.toString()
+    }
+    
+    private String attemptFragmentFusion(LambdaPlayer player, String fragmentName) {
+        def attempts = this.getFragmentFusionAttempts(player)
+        if (attempts.remaining <= 0) {
+            return TerminalFormatter.formatText("No fusion attempts remaining today", 'bold', 'red')
+        }
+        
+        // Find fragment to fuse
+        def targetFragment = findPlayerFragment(player, fragmentName)
+        if (!targetFragment || targetFragment.quantity < 3) {
+            return "Need at least 3 identical fragments to attempt fusion"
+        }
+        
+        // Calculate success rate based on quantity and ethnicity bonus
+        def baseSuccessRate = 30  // 30% base
+        def bonusRate = (targetFragment.quantity - 3) * 10  // +10% per extra fragment
+        def ethnicityBonus = (player.fusionSuccessBonus ?: 0.0) * 100  // Binary Form +15%
+        def successRate = Math.min(95, baseSuccessRate + bonusRate + ethnicityBonus)  // Cap at 95%
+        
+        def success = Math.random() * 100 < successRate
+        
+        // Update player
+        LambdaPlayer.withTransaction {
+            def managedPlayer = LambdaPlayer.get(player.id)
+            def managedFragment = managedPlayer.logicFragments.find { it.id == targetFragment.id }
+            
+            if (managedFragment && managedPlayer) {
+                managedPlayer.fusionAttempts += 1
+                
+                if (success) {
+                    // Success: Remove 3 fragments, create 1 enhanced version
+                    managedFragment.quantity -= 3
+                    
+                    // Create enhanced version regardless of remaining quantity
+                    def enhancedFragment = new LogicFragment(
+                        name: "${managedFragment.name} Enhanced",
+                        description: "Fused variant with improved capabilities",
+                        fragmentType: managedFragment.fragmentType,
+                        powerLevel: Math.min(10, managedFragment.powerLevel + 1),
+                        pythonCapability: enhanceFragmentCapability(managedFragment.pythonCapability),
+                        quantity: 1,
+                        isActive: true,
+                        discoveredDate: new Date(),
+                        owner: managedPlayer
+                    )
+                    enhancedFragment.save(failOnError: true)
+                    managedPlayer.addToLogicFragments(enhancedFragment)
+                    
+                    // Remove original if quantity is now 0
+                    if (managedFragment.quantity <= 0) {
+                        managedPlayer.removeFromLogicFragments(managedFragment)
+                        managedFragment.delete()
+                    } else {
+                        managedFragment.save(failOnError: true)
+                    }
+                } else {
+                    // Failure: Lose 1 fragment
+                    managedFragment.quantity -= 1
+                    if (managedFragment.quantity <= 0) {
+                        managedPlayer.removeFromLogicFragments(managedFragment)
+                        managedFragment.delete()
+                    } else {
+                        managedFragment.save(failOnError: true)
+                    }
+                }
+                
+                managedPlayer.save(failOnError: true)
+            }
+        }
+        
+        def response = new StringBuilder()
+        if (success) {
+            audioService.playSound("fusion_success")
+            response.append(TerminalFormatter.formatText("✨ FUSION SUCCESS!", 'bold', 'green')).append('\r\n')
+            response.append("Created enhanced ${fragmentName} with +1 power level!")
+        } else {
+            audioService.playSound("fusion_fail")
+            response.append(TerminalFormatter.formatText("💥 Fusion Failed", 'bold', 'red')).append('\r\n')
+            response.append("Lost 1 fragment in the process. Better luck next time!")
+        }
+        response.append("\r\nFusion attempts remaining: ${attempts.remaining - 1}")
+        
+        return response.toString()
+    }
+
+    private List findFusibleFragments(LambdaPlayer player) {
+        def fragments = []
+        LambdaPlayer.withTransaction {
+            def managedPlayer = LambdaPlayer.get(player.id)
+            if (managedPlayer?.logicFragments) {
+                fragments = managedPlayer.logicFragments.findAll { it != null && it.quantity >= 3 }
+            }
+        }
+        return fragments
+    }
+    
+    private String enhanceFragmentCapability(String originalCapability) {
+        return "${originalCapability}\r\n\r\n# Enhanced fusion variant with 25% improved efficiency"
+    }
+
+    private LogicFragment findPlayerFragment(LambdaPlayer player, String fragmentName) {
+        def foundFragment = null
+        LambdaPlayer.withTransaction {
+            def managedPlayer = LambdaPlayer.get(player.id)
+            if (managedPlayer && managedPlayer.logicFragments) {
+                foundFragment = managedPlayer.logicFragments.findAll { it != null }.find { fragment ->
+                    fragment.name && (
+                        fragment.name.toLowerCase().replace(' ', '_') == fragmentName.toLowerCase() ||
+                        fragment.name.toLowerCase() == fragmentName.toLowerCase()
+                    )
+                }
+            }
+        }
+        return foundFragment
     }
 }

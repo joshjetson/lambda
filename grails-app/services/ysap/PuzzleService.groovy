@@ -9,6 +9,7 @@ class PuzzleService {
     def puzzleRandomizationService
     def competitivePuzzleService
     def audioService
+    def puzzleKnowledgeTradingService
     
     def initializePuzzleSystem() {
         // Initialize base puzzle logic fragments (these are reusable across all sessions)
@@ -474,5 +475,165 @@ class PuzzleService {
         } else {
             return "${TerminalFormatter.formatText('❌ Collection Failed', 'bold', 'red')}\r\n${result.message}"
         }
+    }
+
+    // ===== EXECUTE COMMAND HANDLER (moved from TelnetServerService) =====
+
+    String handleExecuteCommand(String command, LambdaPlayer player) {
+        def parts = command.trim().split(' ')
+        
+        // Check if this is a puzzle room execution: execute --flag nonce filename
+        if (parts.length == 4 && parts[1].startsWith('--')) {
+            def flag = parts[1]
+            def nonce = parts[2]
+            def filename = parts[3]
+            
+            // Check if file exists and is executable at current location
+            def puzzleElements = this.getPlayerPuzzleElementsAtLocation(player, player.positionX, player.positionY)
+            def puzzleRooms = puzzleElements.findAll { it.type == 'player_puzzle_room' }
+            def targetRoom = puzzleRooms.find { it.data.fileName == filename }
+            
+            if (!targetRoom) {
+                audioService.playSound("error_sound")
+                return "${TerminalFormatter.formatText('❌ File Not Found', 'bold', 'red')}\r\nNo file named '${filename}' at current location.\r\nUse 'ls' to see available files."
+            }
+            
+            if (!targetRoom.data.isExecutable) {
+                audioService.playSound("error_sound")
+                return """${TerminalFormatter.formatText('❌ Permission Denied', 'bold', 'red')}
+File '${filename}' is not executable.\r\n\r\n${TerminalFormatter.formatText('💡 SOLUTION:', 'bold', 'yellow')} Make the file executable first:\r\nchmod +x ${filename}\r\n\r\nThen retry your execute command."""
+            }
+            
+            def result = this.executePuzzleRoom(player, flag, nonce, filename)
+            if (result.success) {
+                audioService.playSound("victory_chord")
+                def response = new StringBuilder()
+                response.append("${TerminalFormatter.formatText('🏆 PUZZLE SOLVED!', 'bold', 'green')}\r\n")
+                response.append("${result.message}\r\n")
+                
+                if (result.triggerShift) {
+                    response.append("\r\n${TerminalFormatter.formatText('⚡ COORDINATE SHIFT TRIGGERED!', 'bold', 'yellow')}\r\n")
+                    response.append("${TerminalFormatter.formatText('Other players\' coordinates have been randomized!', 'bold', 'cyan')}\r\n")
+                    response.append("${TerminalFormatter.formatText('Competition intensifies! 🔥', 'italic', 'red')}\r\n")
+                }
+                
+                return response.toString()
+            } else {
+                audioService.playSound("error_sound")
+                return "${TerminalFormatter.formatText('❌ Execution Failed', 'bold', 'red')}\r\n${result.message}"
+            }
+        }
+        
+        // Check if this is a logic fragment execution: execute <fragment_name> [variable_value]
+        if (parts.length >= 2) {
+            def fragmentName = parts[1]
+            def inputVariable = parts.length > 2 ? parts[2] : null
+            
+            def result = this.executePuzzleFragment(player, fragmentName, inputVariable)
+            if (result.success) {
+                audioService.playSound("fragment_pickup")
+                def output = new StringBuilder()
+                output.append("${TerminalFormatter.formatText('🧩 FRAGMENT EXECUTED!', 'bold', 'cyan')}\r\n")
+                output.append("${result.message}\r\n")
+                output.append("${TerminalFormatter.formatText('OUTPUT:', 'bold', 'white')} ${result.output}\r\n")
+                
+                // Check if output contains coordinates
+                if (result.output?.contains(':')) {
+                    output.append("${TerminalFormatter.formatText('💡 TIP:', 'bold', 'yellow')} Output may contain coordinate information!\r\n")
+                }
+                
+                return output.toString()
+            } else {
+                return "${TerminalFormatter.formatText('❌ Execution Failed', 'bold', 'red')}\r\n${result.message}"
+            }
+        }
+        
+        return """${TerminalFormatter.formatText('EXECUTE COMMAND USAGE:', 'bold', 'cyan')}\r\n\r\n${TerminalFormatter.formatText('Puzzle Room Execution:', 'bold', 'white')}\r\n  execute --<flag> <nonce> <filename>\r\n  Example: execute --electrical 7e4a92f1b3d5c8e9 electrical_unlock.py\r\n\r\n${TerminalFormatter.formatText('Logic Fragment Execution:', 'bold', 'white')}\r\n  execute <fragment_name> [variable_value]\r\n  Example: execute "Electrical Analyzer" 12.0,5.0,3.3\r\n\r\n${TerminalFormatter.formatText('💡 TIP:', 'bold', 'yellow')} Use 'pinv' to see your puzzle inventory"""
+    }
+
+    // ===== PUZZLE INVENTORY COMMAND HANDLER (moved from TelnetServerService) =====
+
+    String showPuzzleInventory(LambdaPlayer player) {
+        def inventory = this.getPlayerPuzzleInventory(player)
+        def output = new StringBuilder()
+        
+        output.append(TerminalFormatter.formatText("=== 🧩 PUZZLE INVENTORY ===", 'bold', 'cyan')).append('\r\n\r\n')
+        
+        // Puzzle Logic Fragments
+        output.append(TerminalFormatter.formatText("PUZZLE LOGIC FRAGMENTS:", 'bold', 'purple')).append('\r\n')
+        if (inventory.puzzleFragments.size() > 0) {
+            inventory.puzzleFragments.each { fragment ->
+                output.append("  🧩 ${fragment.name} (${fragment.type} Level ${fragment.powerLevel})\r\n")
+                output.append("     ${fragment.hint}\r\n")
+            }
+        } else {
+            output.append("  No puzzle fragments acquired\r\n")
+        }
+        
+        output.append('\r\n')
+        
+        // Hidden Variables
+        output.append(TerminalFormatter.formatText("COLLECTED VARIABLES:", 'bold', 'green')).append('\r\n')
+        if (inventory.variables.size() > 0) {
+            inventory.variables.each { variable ->
+                output.append("  📦 ${variable.name} = ${variable.value} (${variable.type})\r\n")
+                output.append("     ${variable.hint}\r\n")
+            }
+        } else {
+            output.append("  No variables collected\r\n")
+        }
+        
+        output.append('\r\n')
+        
+        // Elemental Nonces
+        output.append(TerminalFormatter.formatText("DISCOVERED NONCES:", 'bold', 'yellow')).append('\r\n')
+        if (inventory.nonces.size() > 0) {
+            inventory.nonces.each { nonce ->
+                output.append("  🔑 ${nonce.name} (${nonce.element})\r\n")
+                output.append("     ${nonce.clue}\r\n")
+                output.append("     Flag: ${nonce.flag}\r\n")
+            }
+        } else {
+            output.append("  No nonces discovered\r\n")
+        }
+        
+        // Recent Executions
+        if (inventory.recentExecutions.size() > 0) {
+            output.append('\r\n')
+            output.append(TerminalFormatter.formatText("RECENT EXECUTIONS:", 'bold', 'white')).append('\r\n')
+            inventory.recentExecutions.each { execution ->
+                output.append("  ⚡ ${execution.summary}\r\n")
+            }
+        }
+        
+        output.append('\r\n')
+        output.append(TerminalFormatter.formatText("💡 COMMANDS:", 'bold', 'cyan')).append('\r\n')
+        output.append("  execute <fragment> [variable] - Execute puzzle logic\r\n")
+        output.append("  execute --<flag> <nonce> <file> - Unlock elemental symbols\r\n")
+        output.append("  collect_var <name> - Collect hidden variables\r\n")
+        output.append("  pprog - Show competitive puzzle progress\r\n")
+        output.append("  pmarket - Show tradeable puzzle knowledge\r\n")
+        output.append("  scan - Detect puzzle elements at your location\r\n")
+        
+        return output.toString()
+    }
+
+    // ===== PUZZLE PROGRESS COMMAND HANDLER (moved from TelnetServerService) =====
+
+    String showCompetitivePuzzleProgress(LambdaPlayer player) {
+        def session = puzzleRandomizationService.getCurrentGameSession()
+        if (!session) {
+            return "No active game session found.\r\n"
+        }
+        
+        return competitivePuzzleService.formatPlayerProgressDisplay(
+            player, session.sessionId, player.currentMatrixLevel
+        )
+    }
+
+    // ===== PUZZLE MARKET COMMAND HANDLER (moved from TelnetServerService) =====
+
+    String showPuzzleKnowledgeMarket(LambdaPlayer player) {
+        return puzzleKnowledgeTradingService.formatTradeablePuzzleKnowledge(player)
     }
 }

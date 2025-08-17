@@ -6,6 +6,7 @@ import grails.gorm.transactions.Transactional
 class SpecialItemService {
     
     def lambdaMerchantService
+    def audioService
 
     def createSpecialItem(LambdaPlayer player, String itemType) {
         println "DEBUG SpecialItemService: Creating item type '${itemType}' for player ${player.displayName}"
@@ -551,5 +552,65 @@ class SpecialItemService {
             effect: "instant_repair",
             repairedCoordinates: repairTargets
         ]
+    }
+
+    // ===== USE COMMAND HANDLER (moved from TelnetServerService) =====
+
+    String handleUseCommand(String command, LambdaPlayer player) {
+        def parts = command.trim().split(' ', 2)
+        if (parts.length < 2) {
+            return showSpecialItemsUsage(player)
+        }
+        
+        def itemName = parts[1]
+        def result = this.useSpecialItem(player, itemName)
+        
+        if (result.success) {
+            audioService.playSound("special_item_use")
+            def response = new StringBuilder()
+            response.append(TerminalFormatter.formatText("✨ ${result.message}", 'bold', 'green'))
+            
+            // Handle special item effects
+            if (result.scanData) {
+                response.append('\r\n').append(TerminalFormatter.formatText("📡 SCAN RESULTS:", 'bold', 'cyan'))
+                result.scanData.each { scanLine ->
+                    response.append('\r\n').append(scanLine)
+                }
+            }
+            
+            if (result.mapData) {
+                response.append('\r\n').append(TerminalFormatter.formatText("🗺️  MATRIX MAP:", 'bold', 'cyan'))
+                result.mapData.each { mapLine ->
+                    response.append('\r\n').append(mapLine)
+                }
+            }
+            
+            return response.toString()
+        } else {
+            return TerminalFormatter.formatText("❌ ${result.message}", 'bold', 'red')
+        }
+    }
+    
+    private String showSpecialItemsUsage(LambdaPlayer player) {
+        def items = this.listPlayerItems(player)
+        def usage = new StringBuilder()
+        
+        usage.append(TerminalFormatter.formatText("=== SPECIAL ITEMS USAGE ===", 'bold', 'cyan')).append('\r\n')
+        usage.append("Usage: use <item_name>\r\n\r\n")
+        
+        if (items) {
+            usage.append("Available Items:\r\n")
+            items.each { item ->
+                def status = item.usesRemaining > 0 ? "[${item.usesRemaining} uses]" : "[DEPLETED]"
+                def color = item.usesRemaining > 0 ? 'green' : 'red'
+                usage.append("• ${item.name} ${TerminalFormatter.formatText(status, 'bold', color)}\r\n")
+                usage.append("  ${item.description}\r\n")
+            }
+        } else {
+            usage.append("No special items in inventory.\r\n")
+            usage.append("Defeat defrag bots to find special items!\r\n")
+        }
+        
+        return usage.toString()
     }
 }

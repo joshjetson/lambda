@@ -834,6 +834,73 @@ class LambdaPlayerService {
         return map.toString()
     }
 
+    // ===== RECURSE COMMAND HANDLER (moved from TelnetServerService) =====
+
+    String handleRecurseCommand(String ability, LambdaPlayer player, PrintWriter writer) {
+        // Check if player has recursion charges available
+        LambdaPlayer.withTransaction {
+            def managedPlayer = LambdaPlayer.get(player.id)
+            if (!managedPlayer) {
+                return "Player not found\r\n"
+            }
+            
+            // Check recursion cooldown and charges (TODO: implement tracking fields)
+            // For now, return a placeholder implementation
+            def ethnicity = managedPlayer.avatarSilhouette
+            
+            switch (ability.toLowerCase()) {
+                case 'movement':
+                    if (ethnicity == 'GEOMETRIC_ENTITY') {
+                        return handleRecursiveMovement(managedPlayer, writer)
+                    }
+                    return "Movement recursion not available for your ethnicity\r\n"
+                    
+                case 'fusion':
+                    if (ethnicity == 'CLASSIC_LAMBDA') {
+                        return "Fusion recursion activated - next fragment fusion has +15% success rate\r\n"
+                    }
+                    return "Fusion recursion not available for your ethnicity\r\n"
+                    
+                case 'defend':
+                    if (ethnicity == 'CIRCUIT_PATTERN') {
+                        return "Defense recursion activated - next defrag encounter has +15% resistance\r\n"
+                    }
+                    return "Defense recursion not available for your ethnicity\r\n"
+                    
+                case 'mine':
+                    if (ethnicity == 'FLOWING_CURRENT') {
+                        return "Mining recursion activated - next mining cycle has +25% efficiency\r\n"
+                    }
+                    return "Mining recursion not available for your ethnicity\r\n"
+                    
+                case 'stealth':
+                    if (ethnicity == 'DIGITAL_GHOST') {
+                        return "Stealth recursion activated - enhanced defrag avoidance for 10 minutes\r\n"
+                    }
+                    return "Stealth recursion not available for your ethnicity\r\n"
+                    
+                case 'process':
+                    if (ethnicity == 'BINARY_FORM') {
+                        return "Processing recursion activated - cooldowns reduced for 5 minutes\r\n"
+                    }
+                    return "Processing recursion not available for your ethnicity\r\n"
+                    
+                default:
+                    return "Unknown recursion ability. Available: movement, fusion, defend, mine, stealth, process\r\n"
+            }
+        }
+    }
+    
+    private String handleRecursiveMovement(LambdaPlayer player, PrintWriter writer) {
+        // Enhanced movement allows 2-3 coordinate jump
+        writer.println("Enhanced movement mode activated!")
+        writer.print("Enter target coordinates for recursive movement (x,y): ")
+        writer.flush()
+        
+        // TODO: Implement proper input handling for recursive movement
+        return "Recursive movement ready - next cc command will jump 2-3 coordinates\r\n"
+    }
+
     private String viewPythonEnvironment(LambdaPlayer player) {
         def env = new StringBuilder()
         env.append(TerminalFormatter.formatText("=== PYTHON EXECUTION ENVIRONMENT ===", 'bold', 'cyan')).append('\r\n')

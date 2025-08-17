@@ -3,6 +3,7 @@ package ysap
 import grails.gorm.transactions.Transactional
 import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
+import ysap.helpers.BoxBuilder
 
 @Transactional
 class LambdaMerchantService {
@@ -159,35 +160,36 @@ class LambdaMerchantService {
         def currentPlayer = LambdaPlayer.get(player.id)
         def currentBits = currentPlayer?.bits ?: player.bits
         
-        def display = new StringBuilder()
-        display.append("╔════════════════════════════════════════════════╗\n")
-        display.append("║           ${merchant.merchantName.center(42)}           ║\n")
-        display.append("║                FRAGMENT TRADER                 ║\n")
-        display.append("╠════════════════════════════════════════════════╣\n")
-        display.append("║ Your Bits: ${currentBits.toString().padRight(36)} ║\n")
-        display.append("╠════════════════════════════════════════════════╣\n")
-        display.append("║                 LOGIC FRAGMENTS                ║\n")
-        display.append("╠════════════════════════════════════════════════╣\n")
+        def box = new BoxBuilder(48)  // Width matching the original box
+            .addCenteredLine(merchant.merchantName)
+            .addCenteredLine("FRAGMENT TRADER")
+            .addSeparator()
+            .addLine(" Your Bits: ${currentBits}")
+            .addSeparator()
+            .addCenteredLine("LOGIC FRAGMENTS")
+            .addSeparator()
         
+        // Add fragment items
         inventory.fragments.eachWithIndex { fragment, index ->
-            def line = "║ ${(index + 1).toString().padRight(2)} ${fragment.name.padRight(25)} ${fragment.price.toString().padLeft(6)} bits ║"
-            display.append(line).append('\n')
+            def itemLine = " ${(index + 1).toString().padRight(2)} ${fragment.name.padRight(25)} ${fragment.price.toString().padLeft(6)} bits"
+            box.addLine(itemLine)
         }
         
-        display.append("╠════════════════════════════════════════════════╣\n")
-        display.append("║                 SPECIAL ITEMS                  ║\n")
-        display.append("╠════════════════════════════════════════════════╣\n")
+        box.addSeparator()
+            .addCenteredLine("SPECIAL ITEMS")
+            .addSeparator()
         
+        // Add special items
         inventory.specialItems.eachWithIndex { item, index ->
             def itemNum = index + inventory.fragments.size() + 1
-            def line = "║ ${itemNum.toString().padRight(2)} ${item.name.padRight(25)} ${item.price.toString().padLeft(6)} bits ║"
-            display.append(line).append('\n')
+            def itemLine = " ${itemNum.toString().padRight(2)} ${item.name.padRight(25)} ${item.price.toString().padLeft(6)} bits"
+            box.addLine(itemLine)
         }
         
-        display.append("╚════════════════════════════════════════════════╝\n")
-        display.append("Commands: buy <number> | sell <fragment_name> | exit")
+        def result = box.build()
+        result += "Commands: buy <number> | sell <fragment_name> | exit\r\n"
         
-        return display.toString()
+        return result
     }
 
     private Map handlePurchase(LambdaMerchant merchant, String command, LambdaPlayer player) {
@@ -320,7 +322,7 @@ class LambdaMerchantService {
 
         return [
                 success: true,
-                output : "✅ Purchased ${selectedItem.name} for ${selectedItem.price} bits!",
+                output : "✅ Purchased ${selectedItem.name} for ${selectedItem.price} bits!\r\n",
                 action : "purchase"
         ]
     }

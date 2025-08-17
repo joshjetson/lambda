@@ -402,4 +402,199 @@ class CoordinateStateService {
         def moveMessage = "Lambda entity changed coordinates to (${newX},${newY})\r\n"
         return TerminalFormatter.formatText(moveMessage, 'bold', 'green')
     }
+
+    // ===== REPAIR COMMAND HANDLERS (moved from TelnetServerService) =====
+
+    String handleRepairCommand(String command, LambdaPlayer player) {
+        def parts = command.trim().split(' ')
+        
+        if (parts.length == 1) {
+            return showRepairOptions(player)
+        }
+        
+        if (parts.length == 3) {
+            // repair <x> <y> - Return coordinates for telnet service to handle mini-game
+            try {
+                def targetX = Integer.parseInt(parts[1])
+                def targetY = Integer.parseInt(parts[2])
+                return "INITIATE_REPAIR:${targetX},${targetY}"
+            } catch (NumberFormatException e) {
+                return "Invalid coordinates. Usage: repair <x> <y>"
+            }
+        }
+        
+        def subCommand = parts[1].toLowerCase()
+        
+        switch (subCommand) {
+            case 'status':
+                return showAreaRepairStatus(player)
+            case 'scan':
+                return showRepairableCoordinates(player)
+            case 'help':
+                return showRepairHelp()
+            default:
+                return "Unknown repair command. Use 'repair help' for available commands."
+        }
+    }
+    
+    private String showRepairOptions(LambdaPlayer player) {
+        def repair = new StringBuilder()
+        repair.append(TerminalFormatter.formatText("=== COORDINATE REPAIR SYSTEM ===", 'bold', 'cyan')).append('\r\n')
+        
+        def coordinateHealth = this.getCoordinateHealth(player.currentMatrixLevel, player.positionX, player.positionY)
+        repair.append("Current Position: (${player.positionX},${player.positionY})\r\n")
+        repair.append("Health: ${TerminalFormatter.formatText("${coordinateHealth.health}%", 'bold', coordinateHealth.color)} - ${coordinateHealth.status}\r\n\r\n")
+        
+        // Show repairable adjacent coordinates
+        def repairableCoords = this.getRepairableCoordinatesForPlayer(player)
+        if (repairableCoords.size() > 0) {
+            repair.append(TerminalFormatter.formatText("🔧 ADJACENT WIPED COORDINATES:", 'bold', 'red')).append('\r\n')
+            repairableCoords.each { coord ->
+                def dateStr = coord.lastDamaged ? new java.text.SimpleDateFormat('HH:mm').format(coord.lastDamaged) : 'Unknown'
+                repair.append("  (${coord.x},${coord.y}) - ${coord.status} - Destroyed at ${dateStr}\r\n")
+            }
+            repair.append('\r\n')
+        } else {
+            repair.append(TerminalFormatter.formatText("✅ No adjacent coordinates need repair", 'bold', 'green')).append('\r\n\r\n')
+        }
+        
+        repair.append("Available Commands:\r\n")
+        repair.append("repair scan - Show all adjacent repairable coordinates\r\n")
+        repair.append("repair <x> <y> - Repair specific adjacent coordinate\r\n")
+        repair.append("repair status - Show area repair status\r\n")
+        repair.append("repair help - Show detailed repair help\r\n\r\n")
+        
+        if (repairableCoords.size() > 0) {
+            repair.append(TerminalFormatter.formatText("💡 TIP:", 'bold', 'yellow'))
+                .append(" Use 'repair <x> <y>' to fix adjacent wiped coordinates\r\n")
+            repair.append("Example: repair ${repairableCoords[0].x} ${repairableCoords[0].y}")
+        }
+        
+        return repair.toString()
+    }
+    
+    private String showRepairableCoordinates(LambdaPlayer player) {
+        def repair = new StringBuilder()
+        repair.append(TerminalFormatter.formatText("=== REPAIRABLE COORDINATES SCAN ===", 'bold', 'cyan')).append('\r\n')
+        repair.append("Your Position: (${player.positionX},${player.positionY})\r\n\r\n")
+        
+        def repairableCoords = this.getRepairableCoordinatesForPlayer(player)
+        
+        if (repairableCoords.size() > 0) {
+            repair.append(TerminalFormatter.formatText("🔧 ADJACENT WIPED COORDINATES (Repairable):", 'bold', 'red')).append('\r\n')
+            repairableCoords.each { coord ->
+                def dateStr = coord.lastDamaged ? new java.text.SimpleDateFormat('HH:mm:ss').format(coord.lastDamaged) : 'Unknown'
+                repair.append("  (${coord.x},${coord.y}) - Status: ${coord.status} - Destroyed: ${dateStr}\r\n")
+                repair.append("    Command: ${TerminalFormatter.formatText("repair ${coord.x} ${coord.y}", 'bold', 'white')}\r\n")
+            }
+            repair.append('\r\n')
+            repair.append(TerminalFormatter.formatText("⚠️  WARNING:", 'bold', 'yellow'))
+                .append(" Wiped coordinates may contain valuable logic fragments or elemental symbols!\r\n")
+            repair.append("Repair them to access their contents and ensure game progression.")
+        } else {
+            repair.append(TerminalFormatter.formatText("✅ No adjacent coordinates need repair", 'bold', 'green')).append('\r\n')
+            repair.append("All surrounding coordinates are operational.")
+        }
+        
+        return repair.toString()
+    }
+    
+    private String showAreaRepairStatus(LambdaPlayer player) {
+        def repair = new StringBuilder()
+        repair.append(TerminalFormatter.formatText("=== AREA REPAIR STATUS ===", 'bold', 'cyan')).append('\r\n')
+        
+        def damaged = []
+        def critical = []
+        def wiped = []
+        
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                def scanX = Math.max(0, Math.min(9, player.positionX + dx))
+                def scanY = Math.max(0, Math.min(9, player.positionY + dy))
+                
+                if (scanX == player.positionX && scanY == player.positionY) continue
+                
+                def health = this.getCoordinateHealth(player.currentMatrixLevel, scanX, scanY)
+                
+                if (health.health <= 0) {
+                    wiped.add([x: scanX, y: scanY, status: health.status])
+                } else if (health.health <= 25) {
+                    critical.add([x: scanX, y: scanY, health: health.health])
+                } else if (health.health <= 75) {
+                    damaged.add([x: scanX, y: scanY, health: health.health])
+                }
+            }
+        }
+        
+        repair.append("Scan Area: 5x5 grid around (${player.positionX},${player.positionY})\r\n\r\n")
+        
+        if (wiped.size() > 0) {
+            repair.append(TerminalFormatter.formatText("🔧 WIPED COORDINATES (Need Repair):", 'bold', 'red')).append('\r\n')
+            wiped.each { coord ->
+                repair.append("  (${coord.x},${coord.y}) - ${coord.status}\r\n")
+            }
+            repair.append('\r\n')
+        }
+        
+        if (critical.size() > 0) {
+            repair.append(TerminalFormatter.formatText("⚠️  CRITICAL HEALTH:", 'bold', 'red')).append('\r\n')
+            critical.each { coord ->
+                repair.append("  (${coord.x},${coord.y}) - ${coord.health}% health\r\n")
+            }
+            repair.append('\r\n')
+        }
+        
+        if (damaged.size() > 0) {
+            repair.append(TerminalFormatter.formatText("🛠️  DAMAGED COORDINATES:", 'bold', 'yellow')).append('\r\n')
+            damaged.each { coord ->
+                repair.append("  (${coord.x},${coord.y}) - ${coord.health}% health\r\n")
+            }
+            repair.append('\r\n')
+        }
+        
+        if (wiped.size() == 0 && critical.size() == 0 && damaged.size() == 0) {
+            repair.append(TerminalFormatter.formatText("✅ All coordinates in scanning range are healthy!", 'bold', 'green'))
+        }
+        
+        return repair.toString()
+    }
+    
+    private String showRepairHelp() {
+        def help = new StringBuilder()
+        help.append(TerminalFormatter.formatText("=== COORDINATE REPAIR SYSTEM HELP ===", 'bold', 'cyan')).append('\r\n\r\n')
+        
+        help.append(TerminalFormatter.formatText("OVERVIEW:", 'bold', 'white')).append('\r\n')
+        help.append("The coordinate repair system allows you to fix wiped coordinates\r\n")
+        help.append("adjacent to your current position. Wiped coordinates may contain\r\n")
+        help.append("valuable logic fragments or elemental symbols.\r\n\r\n")
+        
+        help.append(TerminalFormatter.formatText("COMMANDS:", 'bold', 'white')).append('\r\n')
+        help.append("repair - Show repair options and adjacent wiped coordinates\r\n")
+        help.append("repair scan - Detailed scan of all repairable coordinates\r\n")
+        help.append("repair <x> <y> - Start repair mini-game for specific coordinate\r\n")
+        help.append("repair status - Show area repair status in 5x5 grid\r\n")
+        help.append("repair help - Show this help\r\n\r\n")
+        
+        help.append(TerminalFormatter.formatText("REPAIR RESTRICTIONS:", 'bold', 'yellow')).append('\r\n')
+        help.append("• You can only repair coordinates adjacent to your position\r\n")
+        help.append("• You must be on a functional coordinate (health > 0%)\r\n")
+        help.append("• Only wiped coordinates (0% health) can be repaired\r\n")
+        help.append("• Repair requires completing a terminal mini-game\r\n\r\n")
+        
+        help.append(TerminalFormatter.formatText("COORDINATE HEALTH STATES:", 'bold', 'white')).append('\r\n')
+        help.append("• 76-100% - Operational (Green)\r\n")
+        help.append("• 26-75%  - Damaged (Yellow)\r\n")
+        help.append("• 1-25%   - Critical (Red)\r\n")
+        help.append("• 0%      - Wiped - Repairable (Red)\r\n\r\n")
+        
+        help.append(TerminalFormatter.formatText("EXAMPLES:", 'bold', 'cyan')).append('\r\n')
+        help.append("repair        # Show repair options\r\n")
+        help.append("repair 3 4    # Repair coordinate (3,4) if adjacent to you\r\n")
+        help.append("repair scan   # Show all coordinates you can repair\r\n\r\n")
+        
+        help.append(TerminalFormatter.formatText("💡 TIP:", 'bold', 'yellow'))
+        help.append(" Repairing coordinates may reveal hidden elemental symbols!")
+        
+        return help.toString()
+    }
 }
