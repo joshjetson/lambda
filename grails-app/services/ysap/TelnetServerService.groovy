@@ -189,13 +189,13 @@ class TelnetServerService {
                 puzzleService.handleChmodCommand(command, player)
             },
             'defrag_status': { player, command, parts, writer ->
-                showAutoDefragStatus()
+                autoDefragService.showAutoDefragStatus()
             },
             'autdefrag': { player, command, parts, writer ->
-                showAutoDefragStatus()
+                autoDefragService.showAutoDefragStatus()
             },
             'session': { player, command, parts, writer ->
-                showSessionInfo()
+                gameSessionService.showSessionInfo()
             },
             'help': { player, command, parts, writer ->
                 if (parts.length > 1) {
@@ -888,68 +888,6 @@ class TelnetServerService {
     
     
     
-    private String showAutoDefragStatus() {
-        def status = autoDefragService.getAutoDefragStatus()
-        def display = new StringBuilder()
-        
-        display.append(TerminalFormatter.formatText("=== AUTO-DEFRAG SYSTEM STATUS ===", 'bold', 'cyan')).append('\n\n')
-        
-        display.append("System Status: ")
-        if (status.isRunning) {
-            display.append(TerminalFormatter.formatText("ACTIVE", 'bold', 'red')).append('\n')
-        } else {
-            display.append(TerminalFormatter.formatText("INACTIVE", 'bold', 'green')).append('\n')
-        }
-        
-        if (status.isRunning) {
-            display.append("Current Cycle: ${status.currentCycle}\n")
-            display.append("Next Break: ${status.nextBreak}\n")
-            display.append("Pattern: ${status.systemInfo}\n\n")
-            
-            display.append(TerminalFormatter.formatText("⚠️  DANGER:", 'bold', 'yellow'))
-                .append(" System defrag bots are actively destroying coordinates!\n")
-            display.append("Use 'repair scan' to check for damaged adjacent coordinates.\n")
-            display.append("Use 'repair <x> <y>' to restore wiped coordinates.\n\n")
-            
-            display.append(TerminalFormatter.formatText("🔧 REPAIR TIPS:", 'bold', 'cyan')).append('\n')
-            display.append("• Wiped coordinates may contain valuable resources\n")
-            display.append("• You can only repair coordinates adjacent to your position\n")
-            display.append("• Stay on functional coordinates to perform repairs\n")
-        } else {
-            display.append("\n${TerminalFormatter.formatText('System defrag bots are currently inactive.', 'bold', 'green')}")
-        }
-        
-        return display.toString()
-    }
-    
-    private String showSessionInfo() {
-        def sessionInfo = gameSessionService.getGameSessionInfo()
-        def sessionStats = gameSessionService.getSessionStats()
-        def display = new StringBuilder()
-        
-        display.append(TerminalFormatter.formatText("=== GAME SESSION INFORMATION ===", 'bold', 'cyan')).append('\n')
-        display.append("Session ID: ${sessionInfo.sessionId}\n")
-        display.append("Started: ${new java.text.SimpleDateFormat('yyyy-MM-dd HH:mm:ss').format(sessionInfo.startTime)}\n")
-        display.append("Runtime: ${Math.round(sessionInfo.runtimeSeconds / 60)} minutes\n")
-        display.append("Fragment Maps: ${sessionInfo.fragmentMapsInitialized} levels initialized\n")
-        display.append("Total Fragments: ${sessionStats.totalFragments}\n\n")
-        
-        display.append(TerminalFormatter.formatText("🎲 RANDOMIZATION STATUS:", 'bold', 'yellow')).append('\n')
-        display.append("✅ Logic fragments: Randomized per session\n")
-        display.append("✅ Special items: Generated randomly on combat\n")
-        display.append("✅ Elemental symbols: Coordinate shifting on player success\n")
-        display.append("✅ Puzzle elements: Unique per player with competitive shifts\n\n")
-        
-        display.append(TerminalFormatter.formatText("📊 DISTRIBUTION DETAILS:", 'bold', 'green')).append('\n')
-        (1..10).each { level ->
-            def levelFragments = sessionStats["level_${level}_fragments"] ?: 0
-            if (levelFragments > 0) {
-                display.append("Matrix Level ${level}: ${levelFragments} logic fragments\n")
-            }
-        }
-        
-        return display.toString()
-    }
 
     // Main player prompt that they see each line
     private String getPlayerPrompt(LambdaPlayer player, PrintWriter writer) {

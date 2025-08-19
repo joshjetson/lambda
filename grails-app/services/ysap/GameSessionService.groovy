@@ -355,4 +355,37 @@ class GameSessionService {
         // \033[2J clears the entire screen, \033[H moves cursor to home position
         return "\033[2J\033[H\r\n"
     }
+    
+    /**
+     * Shows comprehensive game session information
+     * @return Formatted session details with runtime, stats, and randomization status
+     */
+    String showSessionInfo() {
+        def sessionInfo = getGameSessionInfo()
+        def sessionStats = getSessionStats()
+        def display = new StringBuilder()
+        
+        display.append(TerminalFormatter.formatText("=== GAME SESSION INFORMATION ===", 'bold', 'cyan')).append('\r\n')
+        display.append("Session ID: ${sessionInfo.sessionId}\r\n")
+        display.append("Started: ${new java.text.SimpleDateFormat('yyyy-MM-dd HH:mm:ss').format(sessionInfo.startTime)}\r\n")
+        display.append("Runtime: ${Math.round(sessionInfo.runtimeSeconds / 60)} minutes\r\n")
+        display.append("Fragment Maps: ${sessionInfo.fragmentMapsInitialized} levels initialized\r\n")
+        display.append("Total Fragments: ${sessionStats.totalFragments}\r\n\r\n")
+        
+        display.append(TerminalFormatter.formatText("🎲 RANDOMIZATION STATUS:", 'bold', 'yellow')).append('\r\n')
+        display.append("✅ Logic fragments: Randomized per session\r\n")
+        display.append("✅ Special items: Generated randomly on combat\r\n")
+        display.append("✅ Elemental symbols: Coordinate shifting on player success\r\n")
+        display.append("✅ Puzzle elements: Unique per player with competitive shifts\r\n\r\n")
+        
+        display.append(TerminalFormatter.formatText("📊 DISTRIBUTION DETAILS:", 'bold', 'green')).append('\r\n')
+        (1..10).each { level ->
+            def levelFragments = sessionStats["level_${level}_fragments"] ?: 0
+            if (levelFragments > 0) {
+                display.append("Matrix Level ${level}: ${levelFragments} logic fragments\r\n")
+            }
+        }
+        
+        return display.toString()
+    }
 }

@@ -200,4 +200,42 @@ class AutoDefragService {
         executeDefragCycle()
         return "Manual defrag cycle executed."
     }
+    
+    /**
+     * Shows the current status of the auto-defrag system
+     * @return Formatted status display with system information and proper telnet line endings
+     */
+    String showAutoDefragStatus() {
+        def status = getAutoDefragStatus()
+        def display = new StringBuilder()
+        
+        display.append(TerminalFormatter.formatText("=== AUTO-DEFRAG SYSTEM STATUS ===", 'bold', 'cyan')).append('\r\n\r\n')
+        
+        display.append("System Status: ")
+        if (status.isRunning) {
+            display.append(TerminalFormatter.formatText("ACTIVE", 'bold', 'red')).append('\r\n')
+        } else {
+            display.append(TerminalFormatter.formatText("INACTIVE", 'bold', 'green')).append('\r\n')
+        }
+        
+        if (status.isRunning) {
+            display.append("Current Cycle: ${status.currentCycle}\r\n")
+            display.append("Next Break: ${status.nextBreak}\r\n")
+            display.append("Pattern: ${status.systemInfo}\r\n\r\n")
+            
+            display.append(TerminalFormatter.formatText("⚠️  DANGER:", 'bold', 'yellow'))
+                .append(" System defrag bots are actively destroying coordinates!\r\n")
+            display.append("Use 'repair scan' to check for damaged adjacent coordinates.\r\n")
+            display.append("Use 'repair <x> <y>' to restore wiped coordinates.\r\n\r\n")
+            
+            display.append(TerminalFormatter.formatText("🔧 REPAIR TIPS:", 'bold', 'cyan')).append('\r\n')
+            display.append("• Wiped coordinates may contain valuable resources\r\n")
+            display.append("• You can only repair coordinates adjacent to your position\r\n")
+            display.append("• Stay on functional coordinates to perform repairs\r\n")
+        } else {
+            display.append("\r\n${TerminalFormatter.formatText('System defrag bots are currently inactive.', 'bold', 'green')}\r\n")
+        }
+        
+        return display.toString()
+    }
 }
