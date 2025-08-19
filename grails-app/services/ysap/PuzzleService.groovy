@@ -636,4 +636,58 @@ File '${filename}' is not executable.\r\n\r\n${TerminalFormatter.formatText('�
     String showPuzzleKnowledgeMarket(LambdaPlayer player) {
         return puzzleKnowledgeTradingService.formatTradeablePuzzleKnowledge(player)
     }
+    
+    /**
+     * Handles chmod command to make puzzle room files executable
+     * @param command The full chmod command (e.g., "chmod +x filename.py")
+     * @param player The lambda player
+     * @return Formatted response with success/error message and proper telnet line endings
+     */
+    String handleChmodCommand(String command, LambdaPlayer player) {
+        def parts = command.trim().split(' ')
+        
+        if (parts.length != 3 || parts[1] != '+x') {
+            return """${TerminalFormatter.formatText('CHMOD USAGE:', 'bold', 'cyan')}\r\n""" +
+                   """chmod +x <filename>\r\n""" +
+                   """${TerminalFormatter.formatText('EXAMPLES:', 'bold', 'white')}\r\n""" +
+                   """chmod +x air_unlock_3.py\r\n""" +
+                   """chmod +x fire_chamber.py\r\n""" +
+                   """${TerminalFormatter.formatText('NOTE:', 'bold', 'yellow')} Only puzzle room files can be made executable.\r\n"""
+        }
+        
+        def filename = parts[2]
+        
+        // Get puzzle rooms at current location
+        def puzzleElements = getPlayerPuzzleElementsAtLocation(player, player.positionX, player.positionY)
+        def puzzleRooms = puzzleElements.findAll { it.type == 'player_puzzle_room' }
+        
+        def targetRoom = puzzleRooms.find { it.data.fileName == filename }
+        
+        if (!targetRoom) {
+            return """${TerminalFormatter.formatText('❌ File Not Found', 'bold', 'red')}\r\n""" +
+                   """No file named '${filename}' at current location.\r\n""" +
+                   """Use 'ls' to see available files.\r\n"""
+        }
+        
+        def puzzleRoom = targetRoom.data
+        
+        if (puzzleRoom.isExecutable) {
+            return """${TerminalFormatter.formatText('⚠️  Already Executable', 'bold', 'yellow')}\r\n""" +
+                   """File '${filename}' is already executable.\r\n"""
+        }
+        
+        // Make the puzzle room executable
+        def result = makeFileExecutable(player, filename)
+        
+        if (result.success) {
+            return """${TerminalFormatter.formatText('✅ File Made Executable', 'bold', 'green')}\r\n""" +
+                   """File: ${filename}\r\n""" +
+                   """Permissions changed: -rw-r--r-- → -rwxr-xr-x\r\n""" +
+                   """${TerminalFormatter.formatText('💡 TIP:', 'bold', 'yellow')} You can now execute this file with:\r\n""" +
+                   """execute --<flag> <nonce> ${filename}\r\n"""
+        } else {
+            return """${TerminalFormatter.formatText('❌ Permission Change Failed', 'bold', 'red')}\r\n""" +
+                   """${result.message}\r\n"""
+        }
+    }
 }

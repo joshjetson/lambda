@@ -186,7 +186,7 @@ class TelnetServerService {
                 lambdaPlayerService.listFiles(player)
             },
             'chmod': { player, command, parts, writer ->
-                handleChmodCommand(command, player)
+                puzzleService.handleChmodCommand(command, player)
             },
             'defrag_status': { player, command, parts, writer ->
                 showAutoDefragStatus()
@@ -1218,53 +1218,6 @@ class TelnetServerService {
     
     // ============ PUZZLE SYSTEM COMMAND HANDLERS ============
     
-    
-    private String handleChmodCommand(String command, LambdaPlayer player) {
-        def parts = command.trim().split(' ')
-        
-        if (parts.length != 3 || parts[1] != '+x') {
-            return """${TerminalFormatter.formatText('CHMOD USAGE:', 'bold', 'cyan')}
-chmod +x <filename>
-
-${TerminalFormatter.formatText('EXAMPLES:', 'bold', 'white')}
-chmod +x air_unlock_3.py
-chmod +x fire_chamber.py
-
-${TerminalFormatter.formatText('NOTE:', 'bold', 'yellow')} Only puzzle room files can be made executable."""
-        }
-        
-        def filename = parts[2]
-        
-        // Get puzzle rooms at current location
-        def puzzleElements = puzzleService.getPlayerPuzzleElementsAtLocation(player, player.positionX, player.positionY)
-        def puzzleRooms = puzzleElements.findAll { it.type == 'player_puzzle_room' }
-        
-        def targetRoom = puzzleRooms.find { it.data.fileName == filename }
-        
-        if (!targetRoom) {
-            return "${TerminalFormatter.formatText('❌ File Not Found', 'bold', 'red')}\nNo file named '${filename}' at current location.\nUse 'ls' to see available files."
-        }
-        
-        def puzzleRoom = targetRoom.data
-        
-        if (puzzleRoom.isExecutable) {
-            return "${TerminalFormatter.formatText('⚠️  Already Executable', 'bold', 'yellow')}\nFile '${filename}' is already executable."
-        }
-        
-        // Make the puzzle room executable
-        def result = puzzleService.makeFileExecutable(player, filename)
-        
-        if (result.success) {
-            return """${TerminalFormatter.formatText('✅ File Made Executable', 'bold', 'green')}
-File: ${filename}
-Permissions changed: -rw-r--r-- → -rwxr-xr-x
-
-${TerminalFormatter.formatText('💡 TIP:', 'bold', 'yellow')} You can now execute this file with:
-execute --<flag> <nonce> ${filename}"""
-        } else {
-            return "${TerminalFormatter.formatText('❌ Permission Change Failed', 'bold', 'red')}\n${result.message}"
-        }
-    }
     
     
     
