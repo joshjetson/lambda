@@ -1290,4 +1290,73 @@ class LambdaPlayerService {
         
         return files.toString()
     }
+    
+    /**
+     * Retrieves the command history for a player
+     * @param player The lambda player
+     * @return List of recent commands (most recent first)
+     */
+    private List<String> getPlayerCommandHistory(LambdaPlayer player) {
+        try {
+            return CommandHistory.withTransaction {
+                CommandHistory.findAllByPlayer(player, [sort: 'executedAt', order: 'desc', max: 20])
+                    .collect { it.command }
+                // No reverse here - we want most recent first from the database query
+            }
+        } catch (Exception e) {
+            println "Error retrieving command history: ${e.message}"
+            return []
+        }
+    }
+    
+    /**
+     * Shows the command history for a player
+     * @param player The lambda player
+     * @return Formatted command history display with proper telnet line endings
+     */
+    String showCommandHistory(LambdaPlayer player) {
+        def history = getPlayerCommandHistory(player)
+        def output = new StringBuilder()
+        
+        output.append(TerminalFormatter.formatText("=== COMMAND HISTORY ===", 'bold', 'cyan')).append('\r\n')
+        
+        if (history.isEmpty()) {
+            output.append("No command history found.\r\n")
+        } else {
+            output.append("Recent commands (most recent first):\r\n\r\n")
+            history.eachWithIndex { command, index ->
+                def number = String.format("%2d", index + 1)
+                output.append("${TerminalFormatter.formatText(number, 'bold', 'white')}. ${command}\r\n")
+            }
+            output.append("\r\n${TerminalFormatter.formatText('💡 Tip: Copy and paste commands to reuse them', 'italic', 'yellow')}\r\n")
+        }
+        
+        return output.toString()
+    }
+    
+    /**
+     * Saves a command to the player's command history
+     * @param player The lambda player
+     * @param command The command to save
+     */
+    void saveCommandToHistory(LambdaPlayer player, String command) {
+        try {
+            CommandHistory.withTransaction {
+                def commandHistory = new CommandHistory(
+                    player: player,
+                    command: command,
+                    executedAt: new Date()
+                )
+                commandHistory.save(failOnError: true)
+                
+                // Keep only last 20 commands per player
+                def oldCommands = CommandHistory.findAllByPlayer(player, [sort: 'executedAt', order: 'desc'])
+                if (oldCommands.size() > 20) {
+                    oldCommands[20..-1].each { it.delete() }
+                }
+            }
+        } catch (Exception e) {
+            println "Error saving command history: ${e.message}"
+        }
+    }
 }

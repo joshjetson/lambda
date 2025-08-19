@@ -204,7 +204,7 @@ class TelnetServerService {
                 return PlayerHelp.showHelp()
             },
             'history': { player, command, parts, writer ->
-                showCommandHistory(player)
+                lambdaPlayerService.showCommandHistory(player)
             }
     ]
 
@@ -378,7 +378,7 @@ class TelnetServerService {
 
                     // Save command to history if valid
                     if (line?.trim() && !line.trim().equalsIgnoreCase("quit")) {
-                        saveCommandToHistory(player, line.trim())
+                        lambdaPlayerService.saveCommandToHistory(player, line.trim())
                     }
                     // Check for repair mini-game commands
                     println "DEBUG: Checking repair session for ${player.username}, isInSession: ${simpleRepairService.isPlayerInRepairSession(player.username)}"
@@ -1160,61 +1160,6 @@ class TelnetServerService {
     
     
     
-    
-    private void saveCommandToHistory(LambdaPlayer player, String command) {
-        try {
-            CommandHistory.withTransaction {
-                def commandHistory = new CommandHistory(
-                    player: player,
-                    command: command,
-                    executedAt: new Date()
-                )
-                commandHistory.save(failOnError: true)
-                
-                // Keep only last 20 commands per player
-                def oldCommands = CommandHistory.findAllByPlayer(player, [sort: 'executedAt', order: 'desc'])
-                if (oldCommands.size() > 20) {
-                    oldCommands[20..-1].each { it.delete() }
-                }
-            }
-        } catch (Exception e) {
-            println "Error saving command history: ${e.message}"
-        }
-    }
-    
-    private List<String> getPlayerCommandHistory(LambdaPlayer player) {
-        try {
-            return CommandHistory.withTransaction {
-                CommandHistory.findAllByPlayer(player, [sort: 'executedAt', order: 'desc', max: 20])
-                    .collect { it.command }
-                    .reverse() // Most recent first for arrow key navigation
-            }
-        } catch (Exception e) {
-            println "Error retrieving command history: ${e.message}"
-            return []
-        }
-    }
-    
-    private String showCommandHistory(LambdaPlayer player) {
-        def history = getPlayerCommandHistory(player)
-        def output = new StringBuilder()
-        
-        output.append(TerminalFormatter.formatText("=== COMMAND HISTORY ===", 'bold', 'cyan')).append('\r\n')
-        
-        if (history.isEmpty()) {
-            output.append("No command history found.\r\n")
-        } else {
-            output.append("Recent commands (most recent first):\r\n\r\n")
-            history.reverse().eachWithIndex { command, index ->
-                def number = String.format("%2d", index + 1)
-                output.append("${TerminalFormatter.formatText(number, 'bold', 'white')}. ${command}\r\n")
-            }
-            output.append("\r\n${TerminalFormatter.formatText('💡 Tip: Copy and paste commands to reuse them', 'italic', 'yellow')}")
-            output.append("\r\n")
-        }
-        
-        return output.toString()
-    }
     
     private String readLineWithCharacterLogging(InputStream inputStream, OutputStream outputStream, PrintWriter writer) {
         StringBuilder line = new StringBuilder()
