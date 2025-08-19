@@ -44,22 +44,44 @@ The central goal is to defeat the Logic Daemon on each matrix level, which requi
 - **Quality over Speed**: Better to do small, correct changes than large risky ones
 
 ### **Refactoring Progress Status**
-**✅ COMPLETED EXTRACTIONS**:
-- `defrag` commands → `DefragBotService.handleDefragCommandFromTelnet()`
-- `cc` coordinate commands → `CoordinateStateService.handleCoordinateChange()`
-- `status` command → `LambdaPlayerService.getPlayerStatus()`
-- Chat functionality → `ChatService` (enterChat, handleChatCommand, broadcasting)
-- `cat` commands → `LambdaPlayerService.handleCatCommand()`
-- `pickup` commands → `LambdaPlayerService.handlePickupCommand()`
 
-**🔄 IN PROGRESS**: Command handlers map implementation in `TelnetServerService` 
+**🎯 MAJOR MILESTONE COMPLETED**: Switch statement → `commandHandlers` map conversion **DONE**
+The old `processGameCommand()` switch statement has been completely replaced with a clean `commandHandlers` map in `TelnetServerService`.
 
-**⏳ REMAINING COMMANDS TO EXTRACT**:
-- `entropy` commands → move to `EntropyService`
-- `mining` commands → move to appropriate service
-- `recurse` commands → move to appropriate service  
-- `execute` commands → move to appropriate service
-- `shop`/`buy`/`sell` commands → move to `LambdaMerchantService`
+**✅ FULLY REFACTORED (Clean service delegation)**:
+- `status` → `lambdaPlayerService.getPlayerStatus(player)`
+- `scan` → `gameSessionService.scanArea(player)`
+- `inventory` → `lambdaPlayerService.showInventory(player)`
+- `symbols` → `elementalSymbolService.getPlayerSymbolStatus(player)`
+- `execute` → `puzzleService.handleExecuteCommand(command, player)`
+- `fuse`/`fusion` → `entropyService.handleFusionCommand(command, player)`
+- `use` → `specialItemService.handleUseCommand(command, player)`
+- `map` → `lambdaPlayerService.showMatrixMap(player)`
+- `defrag` → `DefragBotService.handleDefragCommandFromTelnet()` (+ session tracking)
+- `cc` → `CoordinateStateService.handleCoordinateChange()`
+- `heap` → `ChatService.enterChat()`
+- `cat` → `LambdaPlayerService.handleCatCommand()`
+- `pickup` → `LambdaPlayerService.handlePickupCommand()`
+- `shop`/`buy`/`sell` → `LambdaMerchantService.handleMerchantCommand()`
+- All puzzle commands → `PuzzleService` methods
+
+**🔶 PARTIALLY REFACTORED (Service + TelnetServerService logic)**:
+- `entropy` → `entropyService.handleEntropyCommand()` + session update logic
+- `mine`/`mining` → `entropyService.handleMiningCommand()` + session update logic  
+- `repair` → `coordinateStateService.handleRepairCommand()` + `initiateRepairMiniGame()`
+- `collect_var`/`recurse` → Service calls + inline validation logic
+
+**✅ RECENTLY COMPLETED**:
+- `clear` → `gameSessionService.clearTerminal()` - DONE (fixed ANSI sequences + proper \r\n formatting)
+
+**❌ NOT YET REFACTORED (Still calling TelnetServerService methods)**:
+- `ls` → `listFiles(player)` - needs service extraction  
+- `chmod` → `handleChmodCommand(command, player)` - needs service extraction
+- `defrag_status`/`autdefrag` → `showAutoDefragStatus()` - needs service extraction
+- `session` → `showSessionInfo()` - needs service extraction
+- `history` → `showCommandHistory(player)` - needs service extraction
+
+**🎯 NEXT PHASE**: Extract remaining 5 TelnetServerService methods to appropriate existing services following the clean delegation pattern.
 
 ### **Git Workflow**
 - Small, atomic commits for easy rollback

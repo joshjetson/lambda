@@ -180,7 +180,7 @@ class TelnetServerService {
                 lambdaPlayerService.showMatrixMap(player)
             },
             'clear': { player, command, parts, writer ->
-                clearTerminal()
+                gameSessionService.clearTerminal()
             },
             'ls': { player, command, parts, writer ->
                 listFiles(player)
@@ -988,11 +988,6 @@ class TelnetServerService {
 
 
 
-    private String clearTerminal() {
-        // ANSI escape sequence to clear screen and move cursor to top-left
-        return "\\033[2J\\033[H"
-    }
-    
     private String listFiles(LambdaPlayer player) {
         def files = new StringBuilder()
         files.append(TerminalFormatter.formatText("=== LAMBDA ENTITY FILE SYSTEM ===", 'bold', 'cyan')).append('\r\n')

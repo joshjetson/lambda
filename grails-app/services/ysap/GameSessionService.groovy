@@ -345,4 +345,14 @@ class GameSessionService {
             scanResult.append("System stability: ${['Stable', 'Fluctuating', 'Unstable'][new Random().nextInt(3)]}\r\n")
             return scanResult.toString()
         }
+    
+    /**
+     * Clears the terminal screen using ANSI escape sequences
+     * @return ANSI clear screen command with proper telnet line endings
+     */
+    String clearTerminal() {
+        // ANSI escape sequence to clear screen and move cursor to top-left
+        // \033[2J clears the entire screen, \033[H moves cursor to home position
+        return "\033[2J\033[H\r\n"
+    }
 }
