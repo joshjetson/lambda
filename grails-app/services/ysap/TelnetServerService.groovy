@@ -374,7 +374,7 @@ class TelnetServerService {
                     def prompt = getPlayerPrompt(player, writer)
                     sendFormattedOutput(clientSocket.getOutputStream(), prompt)
 
-                    def line = readLineWithCharacterLogging(clientSocket.getInputStream(), clientSocket.getOutputStream(), writer)
+                    def line = readLineWithCharacterLogging(clientSocket.getInputStream(), clientSocket.getOutputStream(), writer, player)
 
                     // Save command to history if valid
                     if (line?.trim() && !line.trim().equalsIgnoreCase("quit")) {
@@ -1161,8 +1161,17 @@ class TelnetServerService {
     
     
     
-    private String readLineWithCharacterLogging(InputStream inputStream, OutputStream outputStream, PrintWriter writer) {
+    private String readLineWithCharacterLogging(InputStream inputStream, OutputStream outputStream, PrintWriter writer, LambdaPlayer player) {
         StringBuilder line = new StringBuilder()
+        List<String> commandHistory = []
+        int historyIndex = -1  // -1 means no history navigation active
+        
+        // Get player's command history for arrow key navigation
+        try {
+            commandHistory = lambdaPlayerService.getPlayerCommandHistory(player)
+        } catch (Exception e) {
+            println "Failed to load command history: ${e.message}"
+        }
         
         try {
             // Enable character-at-a-time mode with proper telnet negotiation
@@ -1187,16 +1196,28 @@ class TelnetServerService {
                 System.out.println("KEYSTROKE: ${ch} '${getPrintableChar(ch)}'")
                 System.out.flush()
                 
-                // Handle arrow keys immediately - don't echo them
+                // Handle arrow keys for command history navigation
                 if (ch == 27) { // Start of escape sequence
                     int ch1 = inputStream.read()
                     int ch2 = inputStream.read()
                     if (ch1 == 91) { // '['
-                        if (ch2 == 65) { // 'A' = Up arrow
-                            println "UP ARROW DETECTED - TODO: Show previous command"
+                        if (ch2 == 65 && !commandHistory.isEmpty()) { // 'A' = Up arrow
+                            // Navigate to previous command in history
+                            historyIndex = (historyIndex == -1) ? 0 : Math.min(historyIndex + 1, commandHistory.size() - 1)
+                            String historyCommand = commandHistory[historyIndex]
+                            replaceCurrentLine(outputStream, line, historyCommand)
                             continue
-                        } else if (ch2 == 66) { // 'B' = Down arrow  
-                            println "DOWN ARROW DETECTED - TODO: Show next command"
+                        } else if (ch2 == 66 && historyIndex >= 0) { // 'B' = Down arrow
+                            // Navigate to next command in history
+                            historyIndex--
+                            if (historyIndex < 0) {
+                                // Went past newest command, clear line
+                                replaceCurrentLine(outputStream, line, "")
+                                historyIndex = -1
+                            } else {
+                                String historyCommand = commandHistory[historyIndex]
+                                replaceCurrentLine(outputStream, line, historyCommand)
+                            }
                             continue
                         }
                     }
@@ -1210,11 +1231,15 @@ class TelnetServerService {
                     outputStream.flush()
                     break
                 } else if (ch >= 32 && ch <= 126) { // Printable ASCII
+                    // Reset history navigation when user starts typing
+                    historyIndex = -1
                     line.append((char)ch)
                     outputStream.write(ch)
                     outputStream.flush()
                 } else if (ch == 8 || ch == 127) { // Backspace
                     if (line.length() > 0) {
+                        // Reset history navigation when user edits
+                        historyIndex = -1
                         line.deleteCharAt(line.length() - 1)
                         outputStream.write(8)   // Move back
                         outputStream.write(32)  // Space  
@@ -1228,6 +1253,32 @@ class TelnetServerService {
         }
         
         return line.toString()
+    }
+    
+    /**
+     * Replaces the current line in the terminal with a new command
+     * @param outputStream The terminal output stream
+     * @param currentLine The current line buffer to update
+     * @param newCommand The new command to display
+     */
+    private void replaceCurrentLine(OutputStream outputStream, StringBuilder currentLine, String newCommand) {
+        try {
+            // Clear current line: move cursor to beginning and clear to end of line
+            outputStream.write(13)  // Carriage return (move to beginning of line)
+            outputStream.write(27)  // ESC
+            outputStream.write(91)  // [
+            outputStream.write(75)  // K (clear to end of line)
+            
+            // Update the line buffer
+            currentLine.setLength(0)
+            currentLine.append(newCommand)
+            
+            // Write the new command to terminal
+            outputStream.write(newCommand.getBytes())
+            outputStream.flush()
+        } catch (Exception e) {
+            println "Error replacing current line: ${e.message}"
+        }
     }
     
     private void handleIACSequence(InputStream input, OutputStream output) {

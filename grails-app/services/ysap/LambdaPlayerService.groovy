@@ -1296,7 +1296,7 @@ class LambdaPlayerService {
      * @param player The lambda player
      * @return List of recent commands (most recent first)
      */
-    private List<String> getPlayerCommandHistory(LambdaPlayer player) {
+    List<String> getPlayerCommandHistory(LambdaPlayer player) {
         try {
             return CommandHistory.withTransaction {
                 CommandHistory.findAllByPlayer(player, [sort: 'executedAt', order: 'desc', max: 20])
