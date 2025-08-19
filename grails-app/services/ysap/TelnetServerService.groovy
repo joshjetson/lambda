@@ -183,7 +183,7 @@ class TelnetServerService {
                 gameSessionService.clearTerminal()
             },
             'ls': { player, command, parts, writer ->
-                listFiles(player)
+                lambdaPlayerService.listFiles(player)
             },
             'chmod': { player, command, parts, writer ->
                 handleChmodCommand(command, player)
@@ -988,76 +988,6 @@ class TelnetServerService {
 
 
 
-    private String listFiles(LambdaPlayer player) {
-        def files = new StringBuilder()
-        files.append(TerminalFormatter.formatText("=== LAMBDA ENTITY FILE SYSTEM ===", 'bold', 'cyan')).append('\r\n')
-        files.append("Working Directory: /lambda/entity/${player.username}\r\n\r\n")
-        
-        // Get puzzle rooms at current location
-        def puzzleElements = puzzleService.getPlayerPuzzleElementsAtLocation(player, player.positionX, player.positionY)
-        def puzzleRooms = puzzleElements.findAll { it.type == 'player_puzzle_room' }
-        
-        if (puzzleRooms.size() > 0) {
-            files.append(TerminalFormatter.formatText("PUZZLE ROOM FILES:", 'bold', 'yellow')).append('\r\n')
-            puzzleRooms.each { roomElement ->
-                def puzzleRoom = roomElement.data
-                def permissionColor = puzzleRoom.isExecutable ? 'green' : 'red'
-                files.append(TerminalFormatter.formatText(puzzleRoom.getFileListEntry(), permissionColor)).append('\r\n')
-            }
-            files.append('\n')
-        }
-        
-        // Standard system files (always present)
-        def dateFormatter = new java.text.SimpleDateFormat('MMM dd HH:mm')
-        def currentDate = dateFormatter.format(new Date())
-        
-        files.append(TerminalFormatter.formatText("SYSTEM FILES:", 'bold', 'cyan')).append('\r\n')
-        files.append("-rw-r--r--  1 lambda lambda     1024 ${currentDate} fragment_file\r\n")
-        files.append("-rw-r--r--  1 lambda lambda      512 ${currentDate} status_log\r\n")
-        files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} inventory_data\r\n")
-        files.append("-rw-r--r--  1 lambda lambda      128 ${currentDate} entropy_monitor\r\n")
-        files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} system_map\r\n")
-        
-        // Configuration files based on player progress
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (managedPlayer) {
-                if (managedPlayer.logicFragments?.size() > 0) {
-                    files.append("-rw-r--r--  1 lambda lambda      512 ${currentDate} python_env\r\n")
-                }
-                
-                if (managedPlayer.specialItems?.size() > 0) {
-                    files.append("-rw-r--r--  1 lambda lambda      256 ${currentDate} item_registry\r\n")
-                }
-            }
-        }
-        
-        if (player.currentMatrixLevel > 1) {
-            files.append("-rw-r--r--  1 lambda lambda      384 ${currentDate} exploration_log\r\n")
-        }
-        
-        // Ethnicity-specific files
-        if (player.avatarSilhouette) {
-            files.append("-rw-r--r--  1 lambda lambda      128 ${currentDate} ethnicity_config\r\n")
-        }
-        
-        files.append('\r\n')
-        files.append(TerminalFormatter.formatText("USAGE:", 'bold', 'white')).append('\r\n')
-        files.append("cat <filename>     - View file contents\r\n")
-        files.append("chmod +x <file>    - Make puzzle room file executable\r\n")
-        files.append("execute --<flag> <nonce> <file> - Run executable puzzle room files\r\n")
-        
-        if (puzzleRooms.size() > 0) {
-            def hasNonExecutable = puzzleRooms.any { !it.data.isExecutable }
-            if (hasNonExecutable) {
-                files.append('\r\n')
-                files.append(TerminalFormatter.formatText("💡 TIP:", 'bold', 'yellow'))
-                    .append(" Puzzle room files must be made executable with 'chmod +x <filename>' before they can be executed!\r\n")
-            }
-        }
-        
-        return files.toString()
-    }
 
     private String viewEntropyMonitor(LambdaPlayer player) {
         def monitor = new StringBuilder()
