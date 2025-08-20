@@ -7,11 +7,20 @@ class TerminalFormatter {
     }
 
     private static String generateAnsiCode(String style, String color, String special) {
+        def codes = []
+
         def styleCode = getStyleCode(style)
         def colorCode = getColorCode(color)
         def specialCode = getSpecialCode(special)
 
-        return "\033[${styleCode};${colorCode};${specialCode}m"
+        if (styleCode != 0) codes << styleCode
+        if (colorCode != 39) codes << colorCode
+        if (specialCode != 0) codes << specialCode
+
+        if (codes.isEmpty()) {
+            return "\033[0m"
+        }
+        return "\033[${codes.join(';')}m"
     }
 
     private static int getStyleCode(String style) {
@@ -20,7 +29,7 @@ class TerminalFormatter {
             case "underline":     return 4
             case "italic":        return 3
             case "strikethrough": return 9
-            default:              return 0 // Default style
+            default:              return 0
         }
     }
 
@@ -34,7 +43,15 @@ class TerminalFormatter {
             case "magenta": return 35
             case "cyan":    return 36
             case "white":   return 37
-            default:        return 39 // Default color
+            case "brightBlack":   return 90
+            case "brightRed":     return 91
+            case "brightGreen":   return 92
+            case "brightYellow":  return 93
+            case "brightBlue":    return 94
+            case "brightMagenta": return 95
+            case "brightCyan":    return 96
+            case "brightWhite":   return 97
+            default:        return 39
         }
     }
 
@@ -46,7 +63,7 @@ class TerminalFormatter {
             case "doubleunderline":  return 21
             case "framed":           return 51
             case "encircled":        return 52
-            default:                 return 0 // No special effect
+            default:                 return 0
         }
     }
 

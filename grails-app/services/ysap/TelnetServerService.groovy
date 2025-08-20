@@ -266,7 +266,7 @@ class TelnetServerService {
             }
             
             // Send glitched frame with color
-            def coloredFrame = TerminalFormatter.formatText(animated.toString(), 'bold', 'cyan')
+            def coloredFrame = TerminalFormatter.formatText(animated.toString(), 'bold', 'magenta')
             output.write(coloredFrame.getBytes('UTF-8'))
             output.flush()
             
@@ -275,7 +275,7 @@ class TelnetServerService {
         
         // Final clean logo
         output.write('\033[H'.getBytes())  // Move cursor to home
-        def finalLogo = TerminalFormatter.formatText(logo, 'bold', 'cyan')
+        def finalLogo = TerminalFormatter.formatText(logo, 'bold', 'blue')
         output.write(finalLogo.getBytes('UTF-8'))
         output.write('\033[?25h'.getBytes())  // Show cursor
         output.flush()
@@ -356,8 +356,14 @@ class TelnetServerService {
             welcomeMessage.append(TerminalFormatter.formatText("                    Welcome to the Lambda Digital Realm", 'bold', 'green')).append("\r\n")
             welcomeMessage.append(TerminalFormatter.formatText("               Where electrical entities fight for digital freedom", 'italic', 'yellow')).append("\r\n")
             welcomeMessage.append("\r\n")
-            welcomeMessage.append("Connected entities: ${TerminalFormatter.formatText(clientCount.toString(), 'bold', 'white')} | Status: ${TerminalFormatter.formatText('ONLINE', 'bold', 'green')}").append("\r\n")
-            welcomeMessage.append("\r\n")
+            // Create status box using BoxBuilder
+            def statusBox = new BoxBuilder(60)
+                .addCenteredLine("SYSTEM STATUS")
+                .addEmptyLine()
+                .addCenteredLine("Connected entities: ${TerminalFormatter.formatText(clientCount.toString(), 'bold', 'white')} | Status: ${TerminalFormatter.formatText('ONLINE', 'bold', 'green')}")
+                .build()
+            welcomeMessage.append(statusBox)
+            welcomeMessage.append("\r\n\r\n")
             sendFormattedOutput(clientSocket.getOutputStream(), welcomeMessage.toString())
 
             // Handle player authentication/creation
@@ -457,7 +463,7 @@ class TelnetServerService {
 
     private LambdaPlayer handlePlayerLogin(PrintWriter writer, BufferedReader reader) {
         try {
-            writer.println(TerminalFormatter.formatText("=== LAMBDA ENTITY AUTHENTICATION ===", 'bold', 'cyan'))
+            writer.println(TerminalFormatter.formatText("<[|(LAMBDA ENTITY AUTHENTICATION)|]>", 'bold', 'red'))
             writer.println()
             writer.print("Enter username (or 'new' to create) ('quit' or 'exit' to leave): ")
             writer.flush()

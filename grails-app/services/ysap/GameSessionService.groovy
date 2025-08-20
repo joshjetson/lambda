@@ -246,8 +246,8 @@ class GameSessionService {
         String scanArea(LambdaPlayer player) {
             audioService.playSound("scan_activate")
             def scanResult = new StringBuilder()
-            scanResult.append(TerminalFormatter.formatText("=== AREA SCAN RESULTS ===", 'bold', 'cyan')).append('\r\n')
-            scanResult.append("Matrix Level ${player.currentMatrixLevel} Sector Analysis:\r\n")
+            scanResult.append(TerminalFormatter.formatText("<= SCAN RESULTS =>", 'bold', 'cyan')).append('\r\n')
+            scanResult.append("Matrix Level ${player.currentMatrixLevel} :\r\n")
             scanResult.append("Position: (${player.positionX},${player.positionY})\r\n")
 
             // Check for actual logic fragments at coordinates
