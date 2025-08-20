@@ -506,12 +506,12 @@ class TelnetServerService {
     }
     
     private LambdaPlayer createNewPlayer(PrintWriter writer, BufferedReader reader) {
-        writer.println(TerminalFormatter.formatText("=== LAMBDA ENTITY CREATION ===", 'bold', 'cyan'))
+        writer.println(TerminalFormatter.formatText("| *LAMBDA ENTITY CREATION* |", 'bold', 'cyan'))
         writer.println()
 
         writer.print("Choose username: ")
         writer.flush()
-        String username = reader.readLine()?.trim()
+        String username = reader.readLine()?.trim()?.toLowerCase()
         if (!username || username.length() < 3) {
             writer.println()
             writer.println("Username must be at least 3 characters")
