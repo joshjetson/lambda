@@ -374,7 +374,7 @@ class TelnetServerService {
                     def prompt = getPlayerPrompt(player, writer)
                     sendFormattedOutput(clientSocket.getOutputStream(), prompt)
 
-                    def line = readLineWithCharacterLogging(clientSocket.getInputStream(), clientSocket.getOutputStream(), writer, player)
+                    def line = readLineWithCharacterLogging(clientSocket.getInputStream(), clientSocket.getOutputStream(), writer, player, prompt)
 
                     // Save command to history if valid
                     if (line?.trim() && !line.trim().equalsIgnoreCase("quit")) {
@@ -1161,7 +1161,7 @@ class TelnetServerService {
     
     
     
-    private String readLineWithCharacterLogging(InputStream inputStream, OutputStream outputStream, PrintWriter writer, LambdaPlayer player) {
+    private String readLineWithCharacterLogging(InputStream inputStream, OutputStream outputStream, PrintWriter writer, LambdaPlayer player, String prompt) {
         StringBuilder line = new StringBuilder()
         List<String> commandHistory = []
         int historyIndex = -1  // -1 means no history navigation active
@@ -1205,18 +1205,18 @@ class TelnetServerService {
                             // Navigate to previous command in history
                             historyIndex = (historyIndex == -1) ? 0 : Math.min(historyIndex + 1, commandHistory.size() - 1)
                             String historyCommand = commandHistory[historyIndex]
-                            replaceCurrentLine(outputStream, line, historyCommand)
+                            replaceCurrentLine(outputStream, line, historyCommand, prompt)
                             continue
                         } else if (ch2 == 66 && historyIndex >= 0) { // 'B' = Down arrow
                             // Navigate to next command in history
                             historyIndex--
                             if (historyIndex < 0) {
                                 // Went past newest command, clear line
-                                replaceCurrentLine(outputStream, line, "")
+                                replaceCurrentLine(outputStream, line, "", prompt)
                                 historyIndex = -1
                             } else {
                                 String historyCommand = commandHistory[historyIndex]
-                                replaceCurrentLine(outputStream, line, historyCommand)
+                                replaceCurrentLine(outputStream, line, historyCommand, prompt)
                             }
                             continue
                         }
@@ -1256,15 +1256,23 @@ class TelnetServerService {
     }
     
     /**
-     * Replaces the current line in the terminal with a new command
+     * Replaces the current line in the terminal with a new command, preserving the prompt
      * @param outputStream The terminal output stream
      * @param currentLine The current line buffer to update
      * @param newCommand The new command to display
+     * @param prompt The current prompt (with ANSI codes)
      */
-    private void replaceCurrentLine(OutputStream outputStream, StringBuilder currentLine, String newCommand) {
+    private void replaceCurrentLine(OutputStream outputStream, StringBuilder currentLine, String newCommand, String prompt) {
         try {
-            // Clear current line: move cursor to beginning and clear to end of line
-            outputStream.write(13)  // Carriage return (move to beginning of line)
+            // Calculate how many characters to move back to clear just the command portion
+            int commandLength = currentLine.length()
+            
+            // Move cursor back to the start of the command (after the prompt)
+            for (int i = 0; i < commandLength; i++) {
+                outputStream.write(8)  // Backspace to move cursor back
+            }
+            
+            // Clear from cursor to end of line (clears the old command)
             outputStream.write(27)  // ESC
             outputStream.write(91)  // [
             outputStream.write(75)  // K (clear to end of line)

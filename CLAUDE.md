@@ -71,17 +71,21 @@ The old `processGameCommand()` switch statement has been completely replaced wit
 - `repair` → `coordinateStateService.handleRepairCommand()` + `initiateRepairMiniGame()`
 - `collect_var`/`recurse` → Service calls + inline validation logic
 
-**✅ RECENTLY COMPLETED**:
-- `clear` → `gameSessionService.clearTerminal()` - DONE (fixed ANSI sequences + proper \r\n formatting)
+**🎉 SERVICE EXTRACTION REFACTORING COMPLETE (6/6)**:
+- ✅ `clear` → `gameSessionService.clearTerminal()` - Fixed ANSI sequences + proper \r\n formatting
+- ✅ `ls` → `lambdaPlayerService.listFiles(player)` - Player-specific file system display
+- ✅ `chmod` → `puzzleService.handleChmodCommand(command, player)` - Puzzle file permissions
+- ✅ `defrag_status`/`autdefrag` → `autoDefragService.showAutoDefragStatus()` - System status display
+- ✅ `session` → `gameSessionService.showSessionInfo()` - Session information and stats
+- ✅ `history` → `lambdaPlayerService.showCommandHistory(player)` - Command history display **+ MAJOR BUG FIX**
 
-**❌ NOT YET REFACTORED (Still calling TelnetServerService methods)**:
-- `ls` → `listFiles(player)` - needs service extraction  
-- `chmod` → `handleChmodCommand(command, player)` - needs service extraction
-- `defrag_status`/`autdefrag` → `showAutoDefragStatus()` - needs service extraction
-- `session` → `showSessionInfo()` - needs service extraction
-- `history` → `showCommandHistory(player)` - needs service extraction
+**🔧 CRITICAL BUG FIXES COMPLETED**:
+- **Command History Double Reverse Bug**: Fixed history showing oldest-first instead of newest-first
+- **Terminal Formatting**: All service methods now use proper `\r\n` telnet line endings
+- **Shell-like Arrow Key Navigation**: Implemented full up/down arrow command history cycling
+- **Prompt Preservation**: Arrow keys now preserve dynamic prompt `▲1:(0,4) >` during history navigation
 
-**🎯 NEXT PHASE**: Extract remaining 5 TelnetServerService methods to appropriate existing services following the clean delegation pattern.
+**🎯 MAJOR MILESTONE ACHIEVED**: All commandHandlers now use clean service delegation pattern with zero inline logic.
 
 ### **Git Workflow**
 - Small, atomic commits for easy rollback
@@ -287,7 +291,7 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 8. **Shop**: Find Lambda merchants and use `shop`, `buy`, `sell` commands
 9. **Manage**: Use `cat fragment_file` to view your collection
 
-**Status**: Lambda game v0.3 with complete economy and trading systems operational!
+**Status**: Lambda game v0.5 with complete service refactoring and enhanced terminal interface operational!
 
 ## HOW TO ACTUALLY PLAY & TEST THE GAME
 
@@ -336,6 +340,13 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 3. **Fusion**: Enhance fragments with `fusion [fragment_name]`
 4. **Items**: Use special items with `use [item_name]`
 5. **Heap**: Enter with `mingle` command for social features
+
+**Enhanced Terminal Interface (v0.5)**:
+1. **Shell-like Command History**: Use ⬆️ up arrow and ⬇️ down arrow to cycle through previous commands
+2. **Dynamic Prompt Preservation**: The prompt `▲1:(0,4) >` shows your current matrix level and coordinates
+3. **Seamless Editing**: Start typing to exit history mode, backspace works naturally
+4. **Command History Display**: Use `history` command to view numbered list of recent commands
+5. **Proper Terminal Formatting**: All commands use correct `\r\n` line endings for telnet protocol
 
 **REMEMBER**: Read game output carefully, respond to actual bot IDs and PIDs dynamically, never hardcode values in testing.
 
