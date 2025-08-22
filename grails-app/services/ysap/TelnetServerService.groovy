@@ -30,13 +30,22 @@ class TelnetServerService {
             'status': { player, command, parts, writer ->
                 lambdaPlayerService.getPlayerStatus(player)
             },
+            's': { player, command, parts, writer ->
+                lambdaPlayerService.getPlayerStatus(player)
+            },
             'cc': { player, command, parts, writer ->
                 coordinateStateService.handleCoordinateChange(command, player, writer)
             },
             'scan': { player, command, parts, writer ->
                 gameSessionService.scanArea(player)
             },
+            'sc': { player, command, parts, writer ->
+                gameSessionService.scanArea(player)
+            },
             'inventory': { player, command, parts, writer ->
+                lambdaPlayerService.showInventory(player)
+            },
+            'i': { player, command, parts, writer ->
                 lambdaPlayerService.showInventory(player)
             },
             'heap': { player, command, parts, writer ->
@@ -72,6 +81,9 @@ class TelnetServerService {
                 return "Usage: collect_var <variable_name> - Collect hidden variable\r\n"
             },
             'execute': { player, command, parts, writer ->
+                puzzleService.handleExecuteCommand(command, player)
+            },
+            'ex': { player, command, parts, writer ->
                 puzzleService.handleExecuteCommand(command, player)
             },
             'puzzle_inventory': { player, command, parts, writer ->
@@ -177,6 +189,9 @@ class TelnetServerService {
                 return result
             },
             'map': { player, command, parts, writer ->
+                lambdaPlayerService.showMatrixMap(player)
+            },
+            'm': { player, command, parts, writer ->
                 lambdaPlayerService.showMatrixMap(player)
             },
             'clear': { player, command, parts, writer ->
@@ -641,7 +656,7 @@ class TelnetServerService {
         // Handle quit command
         if (command == null || command.trim().equalsIgnoreCase("quit")) {
             audioService.playSound("logout")
-            return "QUIT:" + TerminalFormatter.formatText("Lambda entity disconnecting...\r\n", 'italic', 'yellow')
+            return "QUIT:" + TerminalFormatter.formatText("Lambda entity disconnecting (state saved)...\r\n", 'italic', 'yellow')
         }
 
         // Check if player is in an active defrag encounter
@@ -1171,6 +1186,7 @@ class TelnetServerService {
         StringBuilder line = new StringBuilder()
         List<String> commandHistory = []
         int historyIndex = -1  // -1 means no history navigation active
+        int cursorPosition = 0  // Track cursor position within the command line
         
         // Get player's command history for arrow key navigation
         try {
@@ -1212,6 +1228,7 @@ class TelnetServerService {
                             historyIndex = (historyIndex == -1) ? 0 : Math.min(historyIndex + 1, commandHistory.size() - 1)
                             String historyCommand = commandHistory[historyIndex]
                             replaceCurrentLine(outputStream, line, historyCommand, prompt)
+                            cursorPosition = line.length() // Reset cursor to end of command
                             continue
                         } else if (ch2 == 66 && historyIndex >= 0) { // 'B' = Down arrow
                             // Navigate to next command in history
@@ -1220,10 +1237,28 @@ class TelnetServerService {
                                 // Went past newest command, clear line
                                 replaceCurrentLine(outputStream, line, "", prompt)
                                 historyIndex = -1
+                                cursorPosition = 0
                             } else {
                                 String historyCommand = commandHistory[historyIndex]
                                 replaceCurrentLine(outputStream, line, historyCommand, prompt)
+                                cursorPosition = line.length() // Reset cursor to end of command
                             }
+                            continue
+                        } else if (ch2 == 68 && cursorPosition > 0) { // 'D' = Left arrow
+                            // Move cursor left within current command
+                            cursorPosition--
+                            outputStream.write(27)  // ESC
+                            outputStream.write(91)  // [
+                            outputStream.write(68)  // D (cursor left)
+                            outputStream.flush()
+                            continue
+                        } else if (ch2 == 67 && cursorPosition < line.length()) { // 'C' = Right arrow
+                            // Move cursor right within current command
+                            cursorPosition++
+                            outputStream.write(27)  // ESC
+                            outputStream.write(91)  // [
+                            outputStream.write(67)  // C (cursor right)
+                            outputStream.flush()
                             continue
                         }
                     }
@@ -1239,17 +1274,63 @@ class TelnetServerService {
                 } else if (ch >= 32 && ch <= 126) { // Printable ASCII
                     // Reset history navigation when user starts typing
                     historyIndex = -1
-                    line.append((char)ch)
-                    outputStream.write(ch)
+                    
+                    // Insert character at cursor position
+                    if (cursorPosition == line.length()) {
+                        // Cursor at end, simple append
+                        line.append((char)ch)
+                        outputStream.write(ch)
+                        cursorPosition++
+                    } else {
+                        // Insert character in middle of line
+                        line.insert(cursorPosition, (char)ch)
+                        
+                        // Save current cursor position and rewrite from cursor to end
+                        String remainingText = line.substring(cursorPosition)
+                        outputStream.write(remainingText.getBytes())
+                        
+                        // Move cursor back to original position + 1
+                        int moveBack = remainingText.length() - 1
+                        for (int i = 0; i < moveBack; i++) {
+                            outputStream.write(27)  // ESC
+                            outputStream.write(91)  // [
+                            outputStream.write(68)  // D (cursor left)
+                        }
+                        cursorPosition++
+                    }
                     outputStream.flush()
                 } else if (ch == 8 || ch == 127) { // Backspace
-                    if (line.length() > 0) {
+                    if (line.length() > 0 && cursorPosition > 0) {
                         // Reset history navigation when user edits
                         historyIndex = -1
-                        line.deleteCharAt(line.length() - 1)
-                        outputStream.write(8)   // Move back
-                        outputStream.write(32)  // Space  
-                        outputStream.write(8)   // Move back
+                        
+                        if (cursorPosition == line.length()) {
+                            // Cursor at end, simple backspace
+                            line.deleteCharAt(line.length() - 1)
+                            outputStream.write(8)   // Move back
+                            outputStream.write(32)  // Space  
+                            outputStream.write(8)   // Move back
+                            cursorPosition--
+                        } else {
+                            // Delete character before cursor position
+                            line.deleteCharAt(cursorPosition - 1)
+                            cursorPosition--
+                            
+                            // Move cursor back, then rewrite remaining text
+                            outputStream.write(8)   // Move back
+                            
+                            // Get text from cursor to end and rewrite it
+                            String remainingText = line.substring(cursorPosition) + " "
+                            outputStream.write(remainingText.getBytes())
+                            
+                            // Move cursor back to correct position
+                            int moveBack = remainingText.length()
+                            for (int i = 0; i < moveBack; i++) {
+                                outputStream.write(27)  // ESC
+                                outputStream.write(91)  // [
+                                outputStream.write(68)  // D (cursor left)
+                            }
+                        }
                         outputStream.flush()
                     }
                 }

@@ -214,6 +214,9 @@ class ChatService {
                 return output.toString()
             }
         }
+        if (trimmedCommand.equalsIgnoreCase('i') || trimmedCommand.equalsIgnoreCase('inventory')){
+            return lambdaPlayerService.showInventory(player)
+        }
         if (trimmedCommand.toLowerCase().startsWith('pay')) {
             if (trimmedCommand.toLowerCase() == 'pay') {
                 return TerminalFormatter.formatText("Usage: pay <entity_name> <bits>", 'bold', 'yellow')
@@ -239,7 +242,7 @@ class ChatService {
             return this.listChatUsers(player)
         }
 
-        if (trimmedCommand.equalsIgnoreCase('help')) {
+        if (trimmedCommand.equalsIgnoreCase('help') || trimmedCommand.equalsIgnoreCase('h')) {
             return PlayerHelp.chat('help')
         }
 
@@ -265,7 +268,7 @@ class ChatService {
                 userList.append("• ${user.displayName}${marker} [Level ${user.currentMatrixLevel}]\r\n")
             }
         } else {
-            userList.append("Alone in heap..\r\n")
+            userList.append("Alone in heap..no sound..no life..just darkness..\r\n")
         }
 
         return userList.toString()
