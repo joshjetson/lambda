@@ -453,9 +453,10 @@ class TelnetServerService {
                                 hudModeSessions.remove(writer)
                                 continue // Continue with normal mode
                             } else if (hudResult == "CONTINUE_HUD_MODE") {
-                                // Show HUD prompt for next command
+                                // Show HUD prompt for next command at dynamic position
                                 def hudPrompt = hudService.getHudPrompt(player)
-                                clientSocket.getOutputStream().write("\033[24;1H".getBytes()) // Move to bottom
+                                def promptRow = hudService.getHudPromptRow(player)
+                                clientSocket.getOutputStream().write("\033[${promptRow};1H".getBytes()) // Move to dynamic bottom position
                                 clientSocket.getOutputStream().write("\033[K".getBytes()) // Clear line
                                 clientSocket.getOutputStream().write(hudPrompt.getBytes("UTF-8"))
                                 clientSocket.getOutputStream().flush()
@@ -467,11 +468,12 @@ class TelnetServerService {
                             
                             // Check if entering HUD mode
                             if (response == "HUD_MODE_ENTER") {
-                                def enterResult = hudService.enterHudMode(clientSocket.getOutputStream(), player)
+                                def enterResult = hudService.enterHudMode(clientSocket.getOutputStream(), player, clientSocket.getInputStream())
                                 if (enterResult == "HUD_MODE_ACTIVE") {
-                                    // Show initial HUD prompt
+                                    // Show initial HUD prompt at dynamic position
                                     def hudPrompt = hudService.getHudPrompt(player)
-                                    clientSocket.getOutputStream().write("\033[24;1H".getBytes()) // Move to bottom
+                                    def promptRow = hudService.getHudPromptRow(player)
+                                    clientSocket.getOutputStream().write("\033[${promptRow};1H".getBytes()) // Move to dynamic bottom position
                                     clientSocket.getOutputStream().write("\033[K".getBytes()) // Clear line
                                     clientSocket.getOutputStream().write(hudPrompt.getBytes("UTF-8"))
                                     clientSocket.getOutputStream().flush()

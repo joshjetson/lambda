@@ -2,13 +2,18 @@ package ysap.helpers
 import ysap.TerminalFormatter
 
 class PlayerHelp {
-    static String showHelp(String category = null) {
+    static String showHelp(String category = null, int maxWidth = 65) {
         if (category) {
-            return showHelpCategory(category)
+            return showHelpCategory(category, maxWidth)
+        }
+
+        // Use compact help for narrow displays (HUD mode)
+        if (maxWidth <= 50) {
+            return showCompactHelp(maxWidth)
         }
 
         // Main help menu
-        def helpMenu = new BoxBuilder(65)
+        def helpMenu = new BoxBuilder(maxWidth)
                 .addCenteredLine("🔮 LAMBDA COMMAND REFERENCE 🔮")
                 .addSeparator()
                 .addCenteredLine("Type 'help <category>' for detailed information")
@@ -35,35 +40,35 @@ class PlayerHelp {
         return TerminalFormatter.formatText(helpMenu, 'bold', 'cyan')
     }
 
-    private static String showHelpCategory(String category) {
+    private static String showHelpCategory(String category, int maxWidth = 70) {
         switch(category.toLowerCase()) {
             case 'basic':
-                return showBasicHelp()
+                return showBasicHelp(maxWidth)
             case 'combat':
-                return showCombatHelp()
+                return showCombatHelp(maxWidth)
             case 'fragments':
-                return showFragmentsHelp()
+                return showFragmentsHelp(maxWidth)
             case 'abilities':
-                return showAbilitiesHelp()
+                return showAbilitiesHelp(maxWidth)
             case 'economy':
-                return showEconomyHelp()
+                return showEconomyHelp(maxWidth)
             case 'puzzle':
-                return showPuzzleHelp()
+                return showPuzzleHelp(maxWidth)
             case 'social':
-                return showSocialHelp()
+                return showSocialHelp(maxWidth)
             case 'repair':
-                return showRepairHelp()
+                return showRepairHelp(maxWidth)
             case 'files':
-                return showFilesHelp()
+                return showFilesHelp(maxWidth)
             case 'all':
-                return showAllHelp()
+                return showAllHelp(maxWidth)
             default:
-                return showHelpError(category)
+                return showHelpError(category, maxWidth)
         }
     }
 
-    private static String showBasicHelp() {
-        def box = new BoxBuilder(70)
+    private static String showBasicHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("📋 BASIC COMMANDS")
                 .addSeparator()
                 .addLine("  ESSENTIAL")
@@ -89,8 +94,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'green')
     }
 
-    private static String showCombatHelp() {
-        def box = new BoxBuilder(70)
+    private static String showCombatHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("⚔️ DEFRAG BOT COMBAT")
                 .addSeparator()
                 .addLine("  ENCOUNTER SEQUENCE")
@@ -117,8 +122,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'red')
     }
 
-    private static String showFragmentsHelp() {
-        def box = new BoxBuilder(70)
+    private static String showFragmentsHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("🧩 LOGIC FRAGMENTS")
                 .addSeparator()
                 .addLine("  COLLECTION")
@@ -145,8 +150,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'magenta')
     }
 
-    private static String showAbilitiesHelp() {
-        def box = new BoxBuilder(70)
+    private static String showAbilitiesHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("✨ SPECIAL ABILITIES")
                 .addSeparator()
                 .addLine("  RECURSION POWERS")
@@ -173,8 +178,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'yellow')
     }
 
-    private static String showEconomyHelp() {
-        def box = new BoxBuilder(70)
+    private static String showEconomyHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("💰 ECONOMY & TRADING")
                 .addSeparator()
                 .addLine("  CURRENCY")
@@ -200,8 +205,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'green')
     }
 
-    private static String showPuzzleHelp() {
-        def box = new BoxBuilder(70)
+    private static String showPuzzleHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("🎯 PUZZLE SYSTEM")
                 .addSeparator()
                 .addLine("  PUZZLE MECHANICS")
@@ -233,8 +238,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'cyan')
     }
 
-    private static String showSocialHelp() {
-        def box = new BoxBuilder(70)
+    private static String showSocialHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("💬 HEAP SPACE")
                 .addSeparator()
                 .addLine("  HEAP SPACE")
@@ -259,8 +264,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'magenta')
     }
 
-    private static String showRepairHelp() {
-        def box = new BoxBuilder(70)
+    private static String showRepairHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("🔧 COORDINATE REPAIR")
                 .addSeparator()
                 .addLine("  REPAIR COMMANDS")
@@ -286,8 +291,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'yellow')
     }
 
-    private static String showFilesHelp() {
-        def box = new BoxBuilder(70)
+    private static String showFilesHelp(int maxWidth = 70) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("📁 FILE SYSTEM")
                 .addSeparator()
                 .addLine("  FILE COMMANDS")
@@ -308,9 +313,9 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'blue')
     }
 
-    private static String showAllHelp() {
+    private static String showAllHelp(int maxWidth = 78) {
         // This would be the original single-page format
-        def box = new BoxBuilder(78)
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("COMPLETE COMMAND REFERENCE")
                 .addSeparator()
                 .addLine("  ⚠️  This is a long list! Consider using 'help <category>' instead")
@@ -321,8 +326,8 @@ class PlayerHelp {
         return TerminalFormatter.formatText(box, 'bold', 'cyan')
     }
 
-    private static String showHelpError(String category) {
-        def box = new BoxBuilder(50)
+    private static String showHelpError(String category, int maxWidth = 50) {
+        def box = new BoxBuilder(maxWidth)
                 .addCenteredLine("❌ HELP ERROR")
                 .addSeparator()
                 .addLine("  Unknown category: '${category}'")
@@ -397,5 +402,26 @@ class PlayerHelp {
             println "Error reading terminal size: $e"
         }
         return "unknown"
+    }
+
+    private static String showCompactHelp(int maxWidth) {
+        def box = new BoxBuilder(maxWidth)
+                .addCenteredLine("🔮 LAMBDA COMMANDS 🔮")
+                .addSeparator()
+                .addLine("  status (s)     - Entity info")
+                .addLine("  inventory (i)  - Items & fragments")
+                .addLine("  cc (x,y)       - Change coords")
+                .addLine("  scan           - Find items")
+                .addLine("  map (m)        - Level overview")
+                .addLine("  pickup         - Collect fragment")
+                .addLine("  mingle         - Enter heap space")
+                .addLine("  help <cat>     - Detailed help")
+                .addEmptyLine()
+                .addLine("  Categories: basic, combat,")
+                .addLine("  fragments, abilities, economy,")
+                .addLine("  puzzle, social, repair, files")
+                .build()
+
+        return TerminalFormatter.formatText(box, 'bold', 'cyan')
     }
 }
