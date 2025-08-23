@@ -21,11 +21,13 @@ class TelnetServerService {
     def autoDefragService
     def gameSessionService
     def simpleRepairService
+    def hudService
     private ServerSocket serverSocket
     private int clientCount = 0
     private List<PrintWriter> clientWriters = new CopyOnWriteArrayList<>() // Thread-safe list
     public Map<PrintWriter, LambdaPlayer> playerSessions = [:] // Track player sessions
-    public Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters
+    public Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters  
+    private Set<PrintWriter> hudModeSessions = [] as Set // Track players in HUD mode
     private Map<String, Closure> commandHandlers = [
             'status': { player, command, parts, writer ->
                 lambdaPlayerService.getPlayerStatus(player)
@@ -220,6 +222,11 @@ class TelnetServerService {
             },
             'history': { player, command, parts, writer ->
                 lambdaPlayerService.showCommandHistory(player)
+            },
+            'hud': { player, command, parts, writer ->
+                // Switch to HUD mode
+                hudModeSessions.add(writer)
+                return "HUD_MODE_ENTER"
             }
     ]
 
@@ -391,9 +398,14 @@ class TelnetServerService {
                 
                 // NOTE: Main game loop
                 while (true) {
-                    // Show prompt with player's avatar symbol
-                    def prompt = getPlayerPrompt(player, writer)
-                    sendFormattedOutput(clientSocket.getOutputStream(), prompt)
+                    // Show prompt with player's avatar symbol (skip if in HUD mode)
+                    def prompt = null
+                    if (!hudModeSessions.contains(writer)) {
+                        prompt = getPlayerPrompt(player, writer)
+                        sendFormattedOutput(clientSocket.getOutputStream(), prompt)
+                    } else {
+                        prompt = "" // Empty prompt for HUD mode
+                    }
 
                     def line = readLineWithCharacterLogging(clientSocket.getInputStream(), clientSocket.getOutputStream(), writer, player, prompt)
 
@@ -431,16 +443,50 @@ class TelnetServerService {
                                 continue // Return to main game instead of disconnecting
                             }
                     } else {
-                        // NOTE: This is the line that processes commands sent during normal gameplay
-                        def response = processGameCommand(line, player, writer)
-                        
-                        // Check if quit command was issued
-                        if (response?.startsWith("QUIT:")) {
-                            writer.println(response.substring(5)) // Remove "QUIT:" prefix
-                            break
+                        // Check if player is in HUD mode
+                        if (hudModeSessions.contains(writer)) {
+                            // Process command in HUD mode
+                            def hudResult = hudService.processHudCommand(line, player, clientSocket.getOutputStream())
+                            
+                            if (hudResult == "EXIT_HUD_MODE") {
+                                // Player exited HUD mode
+                                hudModeSessions.remove(writer)
+                                continue // Continue with normal mode
+                            } else if (hudResult == "CONTINUE_HUD_MODE") {
+                                // Show HUD prompt for next command
+                                def hudPrompt = hudService.getHudPrompt(player)
+                                clientSocket.getOutputStream().write("\033[24;1H".getBytes()) // Move to bottom
+                                clientSocket.getOutputStream().write("\033[K".getBytes()) // Clear line
+                                clientSocket.getOutputStream().write(hudPrompt.getBytes("UTF-8"))
+                                clientSocket.getOutputStream().flush()
+                                continue
+                            }
+                        } else {
+                            // NOTE: This is the line that processes commands sent during normal gameplay
+                            def response = processGameCommand(line, player, writer)
+                            
+                            // Check if entering HUD mode
+                            if (response == "HUD_MODE_ENTER") {
+                                def enterResult = hudService.enterHudMode(clientSocket.getOutputStream(), player)
+                                if (enterResult == "HUD_MODE_ACTIVE") {
+                                    // Show initial HUD prompt
+                                    def hudPrompt = hudService.getHudPrompt(player)
+                                    clientSocket.getOutputStream().write("\033[24;1H".getBytes()) // Move to bottom
+                                    clientSocket.getOutputStream().write("\033[K".getBytes()) // Clear line
+                                    clientSocket.getOutputStream().write(hudPrompt.getBytes("UTF-8"))
+                                    clientSocket.getOutputStream().flush()
+                                }
+                                continue
+                            }
+                            
+                            // Check if quit command was issued
+                            if (response?.startsWith("QUIT:")) {
+                                writer.println(response.substring(5)) // Remove "QUIT:" prefix
+                                break
+                            }
+                            
+                            sendFormattedOutput(clientSocket.getOutputStream(), response)
                         }
-                        
-                        sendFormattedOutput(clientSocket.getOutputStream(), response)
                     }
                 }
             }
@@ -456,6 +502,9 @@ class TelnetServerService {
                 }
                 playerSessions.remove(writer)
             }
+
+            // Clean up HUD mode session if active
+            hudModeSessions.remove(writer)
 
             reader.close()
             writer.close()
@@ -928,7 +977,7 @@ class TelnetServerService {
         return output.toString()
     }
 
-    private String getAvatarSymbol(String avatarType) {
+    String getAvatarSymbol(String avatarType) {
         // Check if THIS CLIENT'S terminal supports Unicode
         switch (avatarType) {
             case 'DIGITAL_GHOST': return '\u25CF'
