@@ -23,6 +23,8 @@ class HudService {
     // Screen buffer for HUD mode - completely different from telnet character-by-character
     private Map<String, String[][]> screenBuffers = [:]
     private Map<String, Integer> commandScrollPositions = [:]
+    // HUD mode session writers for service compatibility
+    private Map<String, PrintWriter> hudSessionWriters = [:]
 
     /**
      * Enter HUD mode for a player - COMPLETELY DIFFERENT ARCHITECTURE
@@ -34,6 +36,13 @@ class HudService {
             // Create dedicated screen buffer for this player
             screenBuffers[playerId] = createEmptyScreenBuffer()
             commandScrollPositions[playerId] = 0
+            
+            // Create a session writer for HUD mode to maintain service compatibility
+            if (!hudSessionWriters[playerId]) {
+                // Create a dummy PrintWriter that writes to a StringWriter
+                // This serves as a session identifier for service methods
+                hudSessionWriters[playerId] = new PrintWriter(new StringWriter())
+            }
             
             // Switch to alternative screen buffer
             outputStream.write("\033[?1049h".getBytes()) // Enter alt buffer
@@ -240,6 +249,7 @@ class HudService {
             // Clean up screen buffer for this player
             screenBuffers.remove(playerId)
             commandScrollPositions.remove(playerId)
+            hudSessionWriters.remove(playerId)
             
             // Return to main screen buffer
             outputStream.write("\033[?25l".getBytes()) // Hide cursor
@@ -337,7 +347,9 @@ class HudService {
                     return "Scan command not implemented in HUD mode yet"
                 }
             case 'cc':
-                return handleCoordinateChangeInHud(command, player)
+                String playerId = player.username
+                PrintWriter sessionWriter = hudSessionWriters[playerId]
+                return coordinateStateService.handleCoordinateChange(command, player, sessionWriter)
 
             case 'help':
                 if (parts.length > 1) {
@@ -372,29 +384,6 @@ class HudService {
         return "status, scan, cc, inventory, map, clear, help, exit"
     }
 
-    /**
-     * Handle coordinate changes in HUD mode
-     */
-    private String handleCoordinateChangeInHud(String command, LambdaPlayer player) {
-        def parts = command.split(' ')
-        if (parts.length >= 2) {
-            def coords = parts[1].split(',')
-            if (coords.length == 2) {
-                try {
-                    int x = coords[0] as int
-                    int y = coords[1] as int
-                    
-                    // Update player position
-                    coordinateStateService.handleCoordinateChange(x, y, player)
-                    
-                    return "Moved to (${x},${y}) - Map updated"
-                } catch (Exception e) {
-                    return "Invalid coordinates: ${command}"
-                }
-            }
-        }
-        return "Invalid coordinate format. Use: cc x,y"
-    }
 
     /**
      * Store command output for display in command area
