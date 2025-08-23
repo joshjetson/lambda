@@ -8,6 +8,7 @@ class ChatService {
     def telnetServerService
     def lambdaPlayerService
     def puzzleKnowledgeTradingService
+    def hudService
 
     def sendMessage(LambdaPlayer player, String messageText, String messageType = 'CHAT') {
         // Check if player has print capability (always true for basic print)
@@ -163,8 +164,21 @@ class ChatService {
             LambdaPlayer.withTransaction {
                 def currentPlayer = LambdaPlayer.get(player.id)
                 if (currentPlayer?.isInMingle) {
-                    writer.println(message)
-                    writer.flush()
+                    if (!telnetServerService.hudModeSessions.contains(writer)) {
+                        // Normal mode users: ensure broadcast doesn't interfere with current prompt
+                        // Move cursor to beginning of line, clear line, show message, then restore prompt
+                        writer.print("\r\033[K" + message)  // \r moves to start, \033[K clears line
+                        // Re-display the current prompt after the message
+                        def prompt = telnetServerService.getPlayerPrompt(currentPlayer, writer)
+                        writer.print(prompt)
+                        writer.flush()
+                    } else {
+                        // HUD mode users: trigger immediate refresh of their heap chat display
+                        def outputStream = telnetServerService.getOutputStreamForWriter(writer)
+                        if (outputStream && hudService) {
+                            hudService.refreshHudScreenForHeapChat(outputStream, currentPlayer)
+                        }
+                    }
                 }
             }
         }

@@ -28,6 +28,7 @@ class TelnetServerService {
     public Map<PrintWriter, LambdaPlayer> playerSessions = [:] // Track player sessions
     public Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters  
     private Set<PrintWriter> hudModeSessions = [] as Set // Track players in HUD mode
+    public Map<PrintWriter, Socket> writerSockets = [:] // Track sockets for HUD refresh
     private Map<String, Closure> commandHandlers = [
             'status': { player, command, parts, writer ->
                 lambdaPlayerService.getPlayerStatus(player)
@@ -357,6 +358,14 @@ class TelnetServerService {
         serverSocket.close()
         println "Telnet server stopped"
     }
+    
+    /**
+     * Get OutputStream for a specific PrintWriter (used for HUD refresh)
+     */
+    OutputStream getOutputStreamForWriter(PrintWriter writer) {
+        def socket = writerSockets[writer]
+        return socket?.getOutputStream()
+    }
 
     private synchronized void handleClient(Socket clientSocket) {
         Thread.start {
@@ -367,6 +376,7 @@ class TelnetServerService {
 
             def writer = new PrintWriter(clientSocket.getOutputStream(), true)
             clientWriters.add(writer)
+            writerSockets[writer] = clientSocket  // Track socket for HUD refresh
 
             def reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
 
@@ -507,6 +517,7 @@ class TelnetServerService {
 
             // Clean up HUD mode session if active
             hudModeSessions.remove(writer)
+            writerSockets.remove(writer)  // Clean up socket mapping
 
             reader.close()
             writer.close()
