@@ -2,6 +2,7 @@ package ysap
 
 import grails.gorm.transactions.Transactional
 import ysap.helpers.PlayerHelp
+import ysap.TerminalFormatter
 
 @Transactional
 class HudService {
@@ -109,19 +110,51 @@ class HudService {
         String mapContent = lambdaPlayerService.showMatrixMap(player)
         String[] mapLines = mapContent.split("\r\n")
         
-        // Place map in right section starting at MAP_START_COL
+        // Place map in right section starting at MAP_START_COL with colors
         int row = 1
         for (String line : mapLines) {
             if (row < SCREEN_HEIGHT - 2) { // Leave room for prompt
                 String cleanLine = stripAnsiCodes(line)
                 for (int i = 0; i < Math.min(cleanLine.length(), SCREEN_WIDTH - MAP_START_COL); i++) {
                     if (MAP_START_COL + i < SCREEN_WIDTH) {
-                        screen[row][MAP_START_COL + i] = cleanLine.charAt(i).toString()
+                        char symbol = cleanLine.charAt(i)
+                        String coloredSymbol = applyHudMapColor(symbol, player, row, i)
+                        screen[row][MAP_START_COL + i] = coloredSymbol
                     }
                 }
                 row++
             }
         }
+    }
+
+    // HUD Map Color Handlers - O(1) lookup for map symbol coloring
+    private final Map<String, Closure<String>> mapColorHandlers = [
+        '@': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "cyan") },
+        'D': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "red") },
+        'F': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "green") },
+        'M': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "yellow") },
+        'X': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "red") },
+        '!': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "yellow") },
+        '.': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "default", "green") },
+        '0': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '1': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '2': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '3': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '4': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '5': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '6': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '7': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '8': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") },
+        '9': { char symbol -> TerminalFormatter.formatText(symbol.toString(), "bold", "white") }
+    ]
+
+    /**
+     * Apply colors to map symbols for HUD mode using O(1) map lookup
+     */
+    private String applyHudMapColor(char symbol, LambdaPlayer player, int mapRow, int mapCol) {
+        String symbolKey = symbol.toString()
+        def colorHandler = mapColorHandlers[symbolKey]
+        return colorHandler ? colorHandler(symbol) : symbolKey
     }
 
     /**
