@@ -13,6 +13,7 @@ class HudService {
     def defragBotService
     def lambdaMerchantService
     def telnetServerService
+    def puzzleService
 
     // HUD mode uses completely different rendering architecture
     private static final int SCREEN_WIDTH = 120
@@ -472,6 +473,20 @@ class HudService {
                     return "Inventory command not implemented in HUD mode yet"
                 }
                 
+            case 'ls':
+                try {
+                    return getCompactFileList(player)
+                } catch (Exception e) {
+                    return "File listing not available: ${e.message}"
+                }
+                
+            case 'cat':
+                try {
+                    return lambdaPlayerService.handleCatCommand(command, player)
+                } catch (Exception e) {
+                    return "Cat command failed: ${e.message}"
+                }
+                
             case 'map':
                 return "Map is always visible in HUD mode (right side)"
             case 'clear':
@@ -489,7 +504,56 @@ class HudService {
      * Get list of available commands
      */
     private String getAvailableCommands() {
-        return "status, scan, cc, inventory, map, clear, help, exit"
+        return "status, scan, cc, inventory, ls, cat, map, clear, help, exit"
+    }
+
+    /**
+     * Get compact file listing optimized for HUD mode width constraints
+     */
+    private String getCompactFileList(LambdaPlayer player) {
+        def files = new StringBuilder()
+        files.append(TerminalFormatter.formatText("FILES", 'bold', 'cyan')).append('\r\n')
+        files.append("Dir: /lambda/${player.username}\r\n\r\n")
+        
+        // Get puzzle rooms at current location (shortened format)
+        def puzzleElements = puzzleService.getPlayerPuzzleElementsAtLocation(player, player.positionX, player.positionY)
+        def puzzleRooms = puzzleElements.findAll { it.type == 'player_puzzle_room' }
+        
+        if (puzzleRooms.size() > 0) {
+            files.append(TerminalFormatter.formatText("PUZZLES:", 'bold', 'yellow')).append('\r\n')
+            puzzleRooms.each { roomElement ->
+                def puzzleRoom = roomElement.data
+                def permissionColor = puzzleRoom.isExecutable ? 'green' : 'red'
+                def perms = puzzleRoom.isExecutable ? 'rwx' : 'r--'
+                files.append(TerminalFormatter.formatText("${perms} ${puzzleRoom.filename}", permissionColor)).append('\r\n')
+            }
+            files.append('\r\n')
+        }
+        
+        // System files (compact)
+        files.append(TerminalFormatter.formatText("SYSTEM:", 'bold', 'blue')).append('\r\n')
+        files.append("rw- fragment_file\r\n")
+        files.append("rw- status_log\r\n")
+        files.append("rw- inventory_data\r\n")
+        files.append("rw- entropy_monitor\r\n")
+        files.append("rw- system_map\r\n")
+        files.append("rw- python_env\r\n")
+        files.append("rw- ethnicity_config\r\n")
+        files.append("r-- puzzle_vars\r\n")
+        
+        // Logic fragments (if any)
+        if (player.logicFragments && player.logicFragments.size() > 0) {
+            files.append("\r\n")
+            files.append(TerminalFormatter.formatText("FRAGMENTS:", 'bold', 'magenta')).append('\r\n')
+            player.logicFragments.findAll { it != null }.each { fragment ->
+                if (fragment) {
+                    def quantity = fragment.quantity > 1 ? " x${fragment.quantity}" : ""
+                    files.append("r-- ${fragment.name}${quantity}\r\n")
+                }
+            }
+        }
+        
+        return files.toString()
     }
 
 
