@@ -49,13 +49,12 @@ class HudService {
             outputStream.write("\033[2J\033[H".getBytes()) // Clear and home
             outputStream.write("\033[?25l".getBytes()) // Hide cursor during rendering
             
-            // Initial render of complete screen
+            // Initial render of complete screen (includes prompt in buffer)
             renderFullScreen(outputStream, player)
             
-            // Clear prompt line and show initial prompt at column 1
-            outputStream.write("\033[24;1H\033[2K".getBytes()) // Go to line 24, col 1, clear entire line
-            String initialPrompt = getHudPrompt(player)
-            outputStream.write(initialPrompt.getBytes("UTF-8"))
+            // Position cursor at the end of the prompt for input (prompt is already in buffer)
+//            String prompt = getHudPrompt(player)
+//            outputStream.write(("\033[23;" + (prompt.length() + 3) + "H").getBytes()) // Position after prompt at row 23
             outputStream.write("\033[?25h".getBytes()) // Show cursor
             
             return "HUD_MODE_ACTIVE"
@@ -88,6 +87,9 @@ class HudService {
         // Clear screen buffer
         clearScreenBuffer(screen)
         
+        // Render outer box around entire HUD
+        renderOuterBox(screen)
+        
         // Render map section (right side) - FIXED POSITION
         renderMapSection(screen, player)
         
@@ -97,7 +99,8 @@ class HudService {
         // Render border between sections
         renderBorder(screen)
         
-        // DON'T render prompt in screen buffer - handle it separately
+        // Render prompt INSIDE the screen buffer to maintain box borders
+        renderPromptInBuffer(screen, player)
         
         // Send entire screen as one atomic operation
         sendScreenBuffer(outputStream, screen)
@@ -112,6 +115,27 @@ class HudService {
     }
 
     /**
+     * Render outer box around entire HUD display
+     */
+    private void renderOuterBox(String[][] screen) {
+        // Top border
+        for (int col = 0; col < SCREEN_WIDTH; col++) {
+            screen[0][col] = (col == 0) ? "╔" : (col == SCREEN_WIDTH - 1) ? "╗" : "═"
+        }
+        
+        // Bottom border  
+        for (int col = 0; col < SCREEN_WIDTH; col++) {
+            screen[SCREEN_HEIGHT - 1][col] = (col == 0) ? "╚" : (col == SCREEN_WIDTH - 1) ? "╝" : "═"
+        }
+        
+        // Left and right borders
+        for (int row = 1; row < SCREEN_HEIGHT - 1; row++) {
+            screen[row][0] = "║"
+            screen[row][SCREEN_WIDTH - 1] = "║"
+        }
+    }
+
+    /**
      * Render map section - PERSISTENT, only changes when player moves
      */
     private void renderMapSection(String[][] screen, LambdaPlayer player) {
@@ -119,13 +143,13 @@ class HudService {
         String mapContent = lambdaPlayerService.showMatrixMap(player)
         String[] mapLines = mapContent.split("\r\n")
         
-        // Place map in right section starting at MAP_START_COL with colors
-        int row = 1
+        // Place map in right section starting at MAP_START_COL with colors (inside outer box)
+        int row = 2 // Start inside the outer box
         for (String line : mapLines) {
-            if (row < SCREEN_HEIGHT - 2) { // Leave room for prompt
+            if (row < SCREEN_HEIGHT - 3) { // Leave room for outer box and prompt
                 String cleanLine = stripAnsiCodes(line)
-                for (int i = 0; i < Math.min(cleanLine.length(), SCREEN_WIDTH - MAP_START_COL); i++) {
-                    if (MAP_START_COL + i < SCREEN_WIDTH) {
+                for (int i = 0; i < Math.min(cleanLine.length(), SCREEN_WIDTH - MAP_START_COL - 1); i++) {
+                    if (MAP_START_COL + i < SCREEN_WIDTH - 1) { // Leave room for right border
                         char symbol = cleanLine.charAt(i)
                         String coloredSymbol = applyHudMapColor(symbol, player, row, i)
                         screen[row][MAP_START_COL + i] = coloredSymbol
@@ -170,24 +194,33 @@ class HudService {
      * Render command section - SCROLLABLE left side
      */
     private void renderCommandSection(String[][] screen, LambdaPlayer player) {
-        // Header
+        // Header (inside outer box)
         String header = "=== HUD MODE ACTIVE ==="
-        writeToScreen(screen, 1, 2, header)
+        writeToScreen(screen, 2, 3, header) // Start inside outer box
         
-        writeToScreen(screen, 2, 2, "Commands work normally, 'exit' to leave")
-        writeToScreen(screen, 3, 2, "Map updates automatically as you move")
+        writeToScreen(screen, 3, 3, "Commands work normally, 'exit' to leave")
+        writeToScreen(screen, 4, 3, "Map updates automatically as you move")
         
         // Add any recent command output here (stored in player session)
         // For now, just show instructions
-        writeToScreen(screen, 5, 2, "Type commands below:")
+        writeToScreen(screen, 6, 3, "Type commands below:")
     }
 
     /**
-     * Render vertical border between sections
+     * Render prompt inside the screen buffer to maintain box borders
+     */
+    private void renderPromptInBuffer(String[][] screen, LambdaPlayer player) {
+//        String prompt = getHudPrompt(player)
+        // Place prompt at bottom inside the outer box (row 22, inside left border)
+        writeToScreen(screen, SCREEN_HEIGHT - 2, 2, '')
+    }
+
+    /**
+     * Render vertical border between sections (inside outer box)
      */
     private void renderBorder(String[][] screen) {
-        for (int row = 0; row < SCREEN_HEIGHT - 1; row++) {
-            screen[row][MAP_START_COL - 1] = "│"
+        for (int row = 1; row < SCREEN_HEIGHT - 1; row++) {
+            screen[row][MAP_START_COL - 1] = "║"
         }
     }
 
@@ -282,14 +315,13 @@ class HudService {
         // Store the output for this player (enhanced storage)
         storeCommandOutput(playerId, command, commandOutput)
         
-        // Re-render entire screen with new output
+        // Re-render entire screen with new output (includes prompt in buffer)
         renderFullScreenWithCommand(outputStream, player, command, commandOutput)
         
-        // Clear command line completely and redraw fresh prompt
-        outputStream.write("\033[24;1H\033[2K".getBytes()) // Go to line 24, col 1, clear entire line
-        String prompt = getHudPrompt(player)
-        outputStream.write(prompt.getBytes("UTF-8"))
-        outputStream.write("\033[?25h".getBytes()) // Show cursor at end of prompt
+        // Position cursor at the end of the prompt for next input  
+//        String prompt = getHudPrompt(player)
+//        outputStream.write(("\033[" + (SCREEN_HEIGHT - 1) + ";" + (prompt.length() + 3) + "H").getBytes()) // Position after prompt
+        outputStream.write("\033[?25h".getBytes()) // Show cursor
         outputStream.flush()
         
         return "CONTINUE_HUD_MODE"
@@ -305,6 +337,9 @@ class HudService {
         // Clear screen buffer
         clearScreenBuffer(screen)
         
+        // Render outer box around entire HUD
+        renderOuterBox(screen)
+        
         // Render map section (right side) - FIXED POSITION
         renderMapSection(screen, player)
         
@@ -314,7 +349,8 @@ class HudService {
         // Render border between sections
         renderBorder(screen)
         
-        // DON'T render prompt here - it will be rendered separately
+        // Render prompt INSIDE the screen buffer to maintain box borders
+        // renderPromptInBuffer(screen, player)  // DISABLED - was causing double prompt
         
         // Send entire screen as one atomic operation
         sendScreenBuffer(outputStream, screen)
@@ -397,31 +433,31 @@ class HudService {
      * Enhanced command section rendering with stored output
      */
     private void renderCommandSectionWithOutput(String[][] screen, LambdaPlayer player, String lastCommand, String lastOutput) {
-        // Header
-        writeToScreen(screen, 1, 2, "=== HUD MODE ACTIVE ===")
-        writeToScreen(screen, 2, 2, "Commands: status, scan, cc, inventory, exit")
+        // Header (inside outer box)
+        writeToScreen(screen, 2, 3, "◄HUD▪MODE►")
+        writeToScreen(screen, 3, 3, "Commands: status, scan, cc, inventory, exit")
         
-        // Draw separator
-        for (int col = 1; col < COMMAND_AREA_WIDTH - 1; col++) {
-            screen[3][col] = "─"
+        // Draw separator (inside outer box)
+        for (int col = 2; col < COMMAND_AREA_WIDTH - 1; col++) {
+            screen[4][col] = "≈"
         }
         
         // Show last command and output if available
         if (lastCommand && lastOutput) {
-            writeToScreen(screen, 5, 2, "> ${lastCommand}")
+            writeToScreen(screen, 6, 3, "> ${lastCommand}")
             
             // Display output, word-wrapping if needed
             String[] outputLines = lastOutput.split("\r\n")
-            int outputRow = 6
+            int outputRow = 7
             for (String line : outputLines) {
-                if (outputRow < SCREEN_HEIGHT - 3) { // Leave room for prompt
+                if (outputRow < SCREEN_HEIGHT - 4) { // Leave room for outer box and prompt
                     String cleanLine = stripAnsiCodes(line)
-                    if (cleanLine.length() <= COMMAND_AREA_WIDTH - 4) {
-                        writeToScreen(screen, outputRow, 2, cleanLine)
+                    if (cleanLine.length() <= COMMAND_AREA_WIDTH - 6) { // Account for outer box
+                        writeToScreen(screen, outputRow, 3, cleanLine)
                     } else {
                         // Word wrap long lines
-                        String wrappedLine = cleanLine.substring(0, COMMAND_AREA_WIDTH - 4)
-                        writeToScreen(screen, outputRow, 2, wrappedLine)
+                        String wrappedLine = cleanLine.substring(0, COMMAND_AREA_WIDTH - 6)
+                        writeToScreen(screen, outputRow, 3, wrappedLine)
                     }
                     outputRow++
                 }
