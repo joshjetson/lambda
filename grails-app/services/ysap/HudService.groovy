@@ -3,6 +3,7 @@ package ysap
 import grails.gorm.transactions.Transactional
 import ysap.helpers.PlayerHelp
 import ysap.TerminalFormatter
+import java.io.StringWriter
 
 @Transactional
 class HudService {
@@ -15,6 +16,7 @@ class HudService {
     def telnetServerService
     def puzzleService
     def chatService
+    def simpleRepairService
 
     // HUD mode uses completely different rendering architecture
     private static final int SCREEN_WIDTH = 120
@@ -75,6 +77,10 @@ class HudService {
     // Heap mode state tracking
     private Map<String, Boolean> playersInHeapMode = [:]
     private Map<String, List<String>> heapChatHistory = [:]
+    // Repair mode state tracking
+    private Map<String, Boolean> playersInRepairMode = [:]
+    private Map<String, List<String>> repairHistory = [:]
+    private Map<String, OutputStream> repairOutputStreams = [:] // Track outputStream for each player in repair mode
 
     /**
      * Get screen height for a session (cached after first detection)
@@ -224,6 +230,12 @@ class HudService {
             return
         }
         
+        // Check if player is in repair mode - show repair interface instead of map
+        if (playersInRepairMode[playerId]) {
+            renderRepairSection(screen, player)
+            return
+        }
+        
         // Get map content
         String mapContent = lambdaPlayerService.showMatrixMap(player)
         String[] mapLines = mapContent.split("\r\n")
@@ -278,6 +290,47 @@ class HudService {
                     message = message.substring(0, maxWidth - 3) + "..."
                 }
                 writeToScreen(screen, row, MAP_START_COL, message)
+                row++
+            }
+        }
+        
+        // Simple exit instruction
+        writeToScreen(screen, screen.length - 4, MAP_START_COL, "type 'exit' to return to map")
+    }
+
+    /**
+     * Render repair section - SIMPLE AND CLEAN
+     */
+    private void renderRepairSection(String[][] screen, LambdaPlayer player) {
+        String playerId = player.username
+        List<String> repairHistory = this.repairHistory[playerId] ?: []
+        
+        // Clear the map area completely
+        for (int row = 2; row < screen.length - 3; row++) {
+            for (int col = MAP_START_COL; col < SCREEN_WIDTH - 1; col++) {
+                screen[row][col] = " "
+            }
+        }
+        
+        // Simple header
+        writeToScreen(screen, 2, MAP_START_COL, "REPAIR MODE")
+        writeToScreen(screen, 3, MAP_START_COL, "-----------")
+        
+        // Show repair output - no wrapping, just truncate if too long
+        int row = 5
+        int maxWidth = 58 // Max width for map area
+        int maxLines = Math.min(repairHistory.size(), screen.length - 10)
+        
+        // Show most recent repair output
+        int startIndex = Math.max(0, repairHistory.size() - maxLines)
+        for (int i = startIndex; i < repairHistory.size() && row < screen.length - 4; i++) {
+            String line = repairHistory[i]
+            if (line) {
+                // Truncate if too long instead of wrapping
+                if (line.length() > maxWidth) {
+                    line = line.substring(0, maxWidth - 3) + "..."
+                }
+                writeToScreen(screen, row, MAP_START_COL, line)
                 row++
             }
         }
@@ -499,6 +552,28 @@ class HudService {
             return "CONTINUE_HUD_MODE" // Continue in HUD mode with refreshed display
         }
         
+        // Check for active repair mini-game session (highest priority)
+        if (simpleRepairService.isPlayerInRepairSession(playerId)) {
+            // Player is in active repair mini-game - route input to repair service
+            return handleActiveRepairSession(command, player, outputStream)
+        }
+        
+        // Check if player is in repair mode
+        if (playersInRepairMode[playerId] && command.toLowerCase() == 'exit') {
+            // Exit repair mode, return to map view
+            playersInRepairMode[playerId] = false
+            repairOutputStreams.remove(playerId) // Clean up outputStream
+            
+            // Automatically trigger help command to refresh display and position cursor properly
+            String helpOutput = processGameCommandForHud('help', player)
+            storeCommandOutput(playerId, 'help', helpOutput)
+            renderFullScreenWithCommand(outputStream, player, 'help', helpOutput)
+            outputStream.write("\033[?25h".getBytes()) // Show cursor
+            outputStream.flush()
+            
+            return "CONTINUE_HUD_MODE" // Continue in HUD mode with refreshed display
+        }
+        
         // Check for HUD mode exit
         if (command.toLowerCase() in ['exit', 'normal', 'quit']) {
             exitHudMode(outputStream, player)
@@ -513,6 +588,86 @@ class HudService {
             boolean messageWasSent = processChatCommand(command, player)
             
             // Always re-render screen to show updated messages
+            renderFullScreen(outputStream, player)
+            return "CONTINUE_HUD_MODE"
+        }
+        
+        // Check for repair command BEFORE processing other commands
+        if (command.trim().toLowerCase().startsWith('repair ')) {
+            // Handle repair command here where we have access to outputStream
+            def result = coordinateStateService.handleRepairCommand(command, player)
+            
+            // Check if this should initiate a mini-game
+            if (result.startsWith("INITIATE_REPAIR:")) {
+                def coords = result.split(":")[1].split(",")
+                def targetX = Integer.parseInt(coords[0])
+                def targetY = Integer.parseInt(coords[1])
+                
+                // Stop any existing repair session
+                simpleRepairService.stopRepairSession(player.username)
+                
+                // Store outputStream FIRST for cycling updates
+                repairOutputStreams[player.username] = outputStream
+                
+                // Create a custom PrintWriter that triggers HUD refresh for cycling digits
+                def hudPrintWriter = new PrintWriter(new StringWriter()) {
+                    @Override
+                    void print(String s) {
+                        // Trigger HUD screen refresh with cycling update (like heap chat)
+                        def currentOutputStream = repairOutputStreams[player.username]
+                        if (currentOutputStream) {
+                            refreshHudScreenForRepairCycling(currentOutputStream, player, s)
+                        }
+                    }
+                    
+                    @Override
+                    void println(String s) {
+                        // Trigger HUD screen refresh with cycling update 
+                        def currentOutputStream = repairOutputStreams[player.username]
+                        if (currentOutputStream) {
+                            refreshHudScreenForRepairCycling(currentOutputStream, player, s)
+                        }
+                    }
+                }
+                
+                // Initiate the new repair mini-game with HUD-compatible PrintWriter
+                def repairResult = simpleRepairService.initiateRepair(player, targetX, targetY, hudPrintWriter)
+                
+                if (repairResult.success) {
+                    // Enter repair display mode and track repair history
+                    playersInRepairMode[player.username] = true
+                    repairHistory[player.username] = []
+                    addToRepairHistory(player.username, "🔧 REPAIR MINI-GAME STARTED")
+                    addToRepairHistory(player.username, "Target: (${targetX},${targetY})")
+                    addToRepairHistory(player.username, "Press ENTER to lock digits!")
+                    addToRepairHistory(player.username, "Type 'exit' to quit.")
+                    
+                    // Re-render screen to show repair interface
+                    renderFullScreen(outputStream, player)
+                    return "CONTINUE_HUD_MODE"
+                } else {
+                    // Show error and continue
+                    storeCommandOutput(playerId, command, repairResult.message)
+                    renderFullScreenWithCommand(outputStream, player, command, repairResult.message)
+                    outputStream.write("\033[?25h".getBytes())
+                    outputStream.flush()
+                    return "CONTINUE_HUD_MODE"
+                }
+            } else {
+                // Show validation error and continue
+                storeCommandOutput(playerId, command, result)
+                renderFullScreenWithCommand(outputStream, player, command, result)
+                outputStream.write("\033[?25h".getBytes())
+                outputStream.flush()
+                return "CONTINUE_HUD_MODE"
+            }
+        }
+        
+        // If in repair mode, handle repair commands
+        if (playersInRepairMode[playerId]) {
+            processRepairCommand(command, player)
+            
+            // Always re-render screen to show repair output
             renderFullScreen(outputStream, player)
             return "CONTINUE_HUD_MODE"
         }
@@ -660,7 +815,7 @@ class HudService {
      * Get list of available commands
      */
     private String getAvailableCommands() {
-        return "status, scan, cc, inventory, ls, cat, heap, map, clear, help, exit"
+        return "status, scan, cc, inventory, ls, cat, heap, repair, map, clear, help, exit"
     }
 
     /**
@@ -768,6 +923,189 @@ class HudService {
     }
 
     /**
+     * Handle active repair mini-game session (like TelnetServerService does)
+     */
+    private String handleActiveRepairSession(String command, LambdaPlayer player, OutputStream outputStream) {
+        String playerId = player.username
+        
+        try {
+            // Handle exit commands
+            if (command.toLowerCase() in ['exit', 'quit']) {
+                simpleRepairService.stopRepairSession(playerId)
+                addToRepairHistory(playerId, "=> ${command}")
+                addToRepairHistory(playerId, "Repair session cancelled.")
+                
+                // If we were in repair mode, stay in repair mode, otherwise return to normal
+                if (playersInRepairMode[playerId]) {
+                    renderFullScreen(outputStream, player)
+                    return "CONTINUE_HUD_MODE"
+                } else {
+                    // Exit to normal HUD mode
+                    String helpOutput = processGameCommandForHud('help', player)
+                    storeCommandOutput(playerId, 'help', helpOutput)
+                    renderFullScreenWithCommand(outputStream, player, 'help', helpOutput)
+                    outputStream.write("\033[?25h".getBytes())
+                    outputStream.flush()
+                    return "CONTINUE_HUD_MODE"
+                }
+            }
+            
+            // Route to repair service (any input acts as space bar press)
+            def enterResult = simpleRepairService.handleSpaceBarPress(playerId)
+            
+            if (enterResult.success) {
+                if (enterResult.message) {
+                    // Add repair output to history (strip ANSI and split lines)
+                    String[] lines = stripAnsiCodes(enterResult.message).split("\r\n")
+                    for (String line : lines) {
+                        if (line.trim()) {
+                            addToRepairHistory(playerId, line.trim())
+                        }
+                    }
+                }
+                
+                // Check if game is still active
+                if (!enterResult.continueGame || !simpleRepairService.isPlayerInRepairSession(playerId)) {
+                    // Mini-game completed - automatically exit repair mode if we were in it
+                    if (playersInRepairMode[playerId]) {
+                        playersInRepairMode[playerId] = false
+                        repairOutputStreams.remove(playerId) // Clean up outputStream
+                        // Return to normal HUD mode with help
+                        String helpOutput = processGameCommandForHud('help', player)
+                        storeCommandOutput(playerId, 'help', helpOutput)
+                        renderFullScreenWithCommand(outputStream, player, 'help', helpOutput)
+                        outputStream.write("\033[?25h".getBytes())
+                        outputStream.flush()
+                        return "CONTINUE_HUD_MODE"
+                    }
+                }
+                
+                // Continue in repair session - refresh display
+                if (playersInRepairMode[playerId]) {
+                    renderFullScreen(outputStream, player)
+                } else {
+                    // If not in repair mode, show on left side
+                    String repairOutput = enterResult.message ?: "Repair session active..."
+                    storeCommandOutput(playerId, command, repairOutput)
+                    renderFullScreenWithCommand(outputStream, player, command, repairOutput)
+                }
+                
+            } else {
+                addToRepairHistory(playerId, "Error: ${enterResult.message}")
+                if (playersInRepairMode[playerId]) {
+                    renderFullScreen(outputStream, player)
+                }
+            }
+            
+            return "CONTINUE_HUD_MODE"
+            
+        } catch (Exception e) {
+            addToRepairHistory(playerId, "Error in repair session: ${e.message}")
+            if (playersInRepairMode[playerId]) {
+                renderFullScreen(outputStream, player)
+            }
+            return "CONTINUE_HUD_MODE"
+        }
+    }
+
+    /**
+     * Process repair commands when in repair mode
+     */
+    private void processRepairCommand(String command, LambdaPlayer player) {
+        String playerId = player.username
+        
+        try {
+            // Get repair output from coordinateStateService
+            String repairResult = coordinateStateService.handleRepairCommand(command, player)
+            
+            // Check if this is an INITIATE_REPAIR command
+            if (repairResult.startsWith("INITIATE_REPAIR:")) {
+                def coords = repairResult.split(":")[1].split(",")
+                def targetX = Integer.parseInt(coords[0])
+                def targetY = Integer.parseInt(coords[1])
+                
+                // For HUD mode, we'll simulate the repair mini-game by calling the service
+                // and capturing the output in repair history instead of running interactively
+                handleHudRepairMiniGame(player, targetX, targetY)
+            } else {
+                // Add the repair command result to history
+                addToRepairHistory(playerId, "=> ${command}")
+                
+                // Split multi-line output and add each line
+                String[] lines = repairResult.split("\r\n")
+                for (String line : lines) {
+                    if (line.trim()) {
+                        addToRepairHistory(playerId, stripAnsiCodes(line))
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            addToRepairHistory(playerId, "Error: ${e.message}")
+        }
+    }
+    
+    /**
+     * Handle repair mini-game for HUD mode
+     */
+    private void handleHudRepairMiniGame(LambdaPlayer player, Integer targetX, Integer targetY) {
+        String playerId = player.username
+        
+        try {
+            // Create a capturing PrintWriter that adds output to repair history
+            StringWriter stringWriter = new StringWriter()
+            PrintWriter capturingWriter = new PrintWriter(stringWriter) {
+                @Override
+                void println(String line) {
+                    super.println(line)
+                    // Add to repair history in real-time
+                    if (line && line.trim()) {
+                        addToRepairHistory(playerId, stripAnsiCodes(line))
+                    }
+                }
+                
+                @Override
+                void print(String text) {
+                    super.print(text)
+                    // For cycling digits, capture partial output too
+                    if (text && text.trim()) {
+                        addToRepairHistory(playerId, stripAnsiCodes(text))
+                    }
+                }
+            }
+            
+            // Initiate repair using the capturing writer
+            def result = simpleRepairService.initiateRepair(player, targetX, targetY, capturingWriter)
+            
+            addToRepairHistory(playerId, "=> repair ${targetX} ${targetY}")
+            if (result.success) {
+                addToRepairHistory(playerId, "✅ Repair mini-game started for (${targetX},${targetY})")
+                addToRepairHistory(playerId, stripAnsiCodes(result.message))
+            } else {
+                addToRepairHistory(playerId, "❌ Repair failed: ${result.message}")
+            }
+            
+        } catch (Exception e) {
+            addToRepairHistory(playerId, "Error starting repair: ${e.message}")
+        }
+    }
+    
+    /**
+     * Add line to repair history
+     */
+    private void addToRepairHistory(String playerId, String line) {
+        if (!repairHistory[playerId]) {
+            repairHistory[playerId] = []
+        }
+        repairHistory[playerId].add(line)
+        
+        // Keep only last 50 lines to prevent memory issues
+        if (repairHistory[playerId].size() > 50) {
+            repairHistory[playerId] = repairHistory[playerId].drop(repairHistory[playerId].size() - 50)
+        }
+    }
+
+    /**
      * Format message timestamp simply
      */
     private String formatMessageTime(def timestamp) {
@@ -867,6 +1205,36 @@ class HudService {
                 outputStream.flush()
             } catch (Exception e) {
                 // If refresh fails, just continue silently
+            }
+        }
+    }
+
+    /**
+     * Refresh HUD screen when repair cycling digits update - SAME PATTERN AS HEAP CHAT
+     */
+    def refreshHudScreenForRepairCycling(OutputStream outputStream, LambdaPlayer player, String cyclingUpdate) {
+        String playerId = player.username
+        
+        // Only refresh if player is in HUD mode AND in repair mode
+        if (playersInRepairMode[playerId] && simpleRepairService.isPlayerInRepairSession(playerId)) {
+            try {
+                // Update repair history with cycling digit (like a new chat message)
+                addToRepairHistory(playerId, cyclingUpdate)
+                
+                // Re-render full screen to show cycling digits
+                renderFullScreen(outputStream, player)
+                
+                // Properly position cursor at the HUD prompt location (same as heap chat)
+                def hudPrompt = getHudPrompt(player)
+                def promptRow = getHudPromptRow(player)
+                outputStream.write("\033[${promptRow};1H".getBytes()) // Move to prompt position
+                outputStream.write("\033[K".getBytes()) // Clear line
+                outputStream.write(hudPrompt.getBytes("UTF-8")) // Write prompt
+                outputStream.write("\033[?25h".getBytes()) // Show cursor
+                outputStream.flush()
+            } catch (Exception e) {
+                // Continue even if refresh fails
+                println "Error refreshing HUD screen for repair cycling: ${e.message}"
             }
         }
     }
