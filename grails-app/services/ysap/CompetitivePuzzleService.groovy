@@ -5,9 +5,10 @@ import java.util.Random
 
 @Transactional
 class CompetitivePuzzleService {
-    
+
     def puzzleRandomizationService
     def chatService
+    def puzzleService
     
     def initializePlayerPuzzleState(LambdaPlayer player, String gameSessionId, Integer mapNumber) {
         println "Initializing competitive puzzle state for player ${player.username} on map ${mapNumber}"
@@ -237,8 +238,13 @@ class CompetitivePuzzleService {
                             break
                     }
                     managedPlayer.save(failOnError: true)
+
+                    // Phase 8: record the nonce this solve consumed as discovered, so the
+                    // unlock_symbol path and the trade economy can see it (reuses the idempotent
+                    // PuzzleService.awardNonce — nonceName follows the "<ELEMENT>_KEY_<map>" convention).
+                    puzzleService.awardNonce(managedPlayer, "${playerState.elementType}_KEY_${mapNumber}")
                 }
-                
+
                 // TRIGGER COORDINATE SHIFT FOR ALL OTHER PLAYERS
                 triggerCompetitiveCoordinateShift(gameSessionId, mapNumber, playerState.elementType, player.username)
                 
@@ -299,7 +305,7 @@ class CompetitivePuzzleService {
             
             // Send to mingle chamber if available
             try {
-                chatService?.broadcastSystemMessage(shiftMessage)
+                chatService.sendSystemMessage(shiftMessage)
             } catch (Exception e) {
                 println "Could not broadcast shift message: ${e.message}"
             }

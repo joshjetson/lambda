@@ -5,7 +5,8 @@ class BootStrap {
     TelnetServerService telnetServerService
     BootstrapService bootstrapService
     LambdaMerchantService lambdaMerchantService
-    
+    def grailsApplication
+
     def init = { servletContext ->
         // Initialize game board data
         initializeBoardPositions()
@@ -16,8 +17,9 @@ class BootStrap {
         // Spawn Lambda merchants across all matrix levels
         lambdaMerchantService.spawnMerchantsForAllLevels()
         
-        // Start telnet server for Lambda game
-        telnetServerService.startServer(23)
+        // Start telnet server for Lambda game (port configurable; test env uses a high port)
+        Integer telnetPort = grailsApplication.config.getProperty('lambda.telnet.port', Integer) ?: 23
+        telnetServerService.startServer(telnetPort)
         
         // Initialize legacy page system
 //        bootstrapService.createFirstPage()
@@ -25,7 +27,7 @@ class BootStrap {
         println "Lambda: A Digital Entities Game initialized"
         println "════════════════════════════════════════════════════════════════"
         println "🎮 LAMBDA GAME SERVER READY"
-        println "📡 Connect via: telnet localhost 23"
+        println "📡 Connect via: telnet localhost ${telnetPort}"
         println "🌐 Web interface: http://localhost:8080 (info only)"
         println "⚡ A hybrid board/computer game for digital entities"
         println "════════════════════════════════════════════════════════════════"

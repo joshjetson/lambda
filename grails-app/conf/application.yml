@@ -13,6 +13,11 @@ info:
         name: '@info.app.name@'
         version: '@info.app.version@'
         grailsVersion: '@info.app.grailsVersion@'
+# Lambda telnet game server. Port 23 is privileged; the test environment overrides
+# it (below) to a high port so integration tests can bind without root.
+lambda:
+    telnet:
+        port: 23
 spring:
     jmx:
         unique-names: true
@@ -39,6 +44,10 @@ environments:
                     base-path: '/actuator'
                     exposure:
                         include: '*'
+    test:
+        lambda:
+            telnet:
+                port: 2323
     production:
         management:
             endpoints:

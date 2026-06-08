@@ -10,7 +10,8 @@ class ElementalSymbol {
     Integer positionX
     Integer positionY
     Date lastRandomized
-    
+    Boolean isHidden = true   // revealed (false) once unlocked via unlock_symbol
+
     static constraints = {
         symbolType inList: ['AIR', 'FIRE', 'EARTH', 'WATER']
         symbolIcon nullable: false

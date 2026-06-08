@@ -126,3 +126,13 @@ assets {
     minifyJs = true
     minifyCss = true
 }
+
+// The webdriver-binaries plugin cannot resolve a driver on this architecture
+// (throws UnsupportedArchitectureException: UNKNOWN on Apple Silicon), which
+// otherwise blocks `integrationTest`. We have no Geb/browser functional tests —
+// the telnet GameplayHarnessSpec drives a raw socket — so disable the driver
+// binary configuration tasks. Remove these lines if/when real browser tests are added.
+tasks.matching {
+    it.name in ['configureChromeDriverBinary', 'configureGeckoDriverBinary',
+                'configureEdgeDriverBinary', 'configureIeDriverServerBinary']
+}.configureEach { it.enabled = false }

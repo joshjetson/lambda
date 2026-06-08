@@ -4,9 +4,81 @@ import grails.gorm.transactions.Transactional
 
 @Transactional
 class SpecialItemService {
-    
+
     def lambdaMerchantService
     def audioService
+    def coordinateStateService
+
+    // ===== ACTIVE-EFFECT GATE (D1): the SpecialItem row IS the effect-state carrier =====
+    // One O(1) query that every consumer asks. No new domain, no new service, no scattered flags.
+
+    /** True while the player has an unexpired active item of this type. Auto-deactivates if expired. */
+    boolean hasActiveEffect(LambdaPlayer player, String itemType) {
+        boolean active = false
+        SpecialItem.withTransaction {
+            def item = SpecialItem.findByOwnerAndItemTypeAndIsActive(player, itemType, true)
+            if (item) {
+                if (item.expiresAt && item.expiresAt < new Date()) {
+                    deactivate(item)            // window closed → clean up
+                } else {
+                    active = true
+                }
+            }
+        }
+        return active
+    }
+
+    /** Consume a one-shot active effect (call right after a consumer applies it). */
+    void consumeEffect(LambdaPlayer player, String itemType) {
+        SpecialItem.withTransaction {
+            def item = SpecialItem.findByOwnerAndItemTypeAndIsActive(player, itemType, true)
+            if (item) deactivate(item)
+        }
+    }
+
+    /** Deactivate an active-effect item; delete it if it has no uses left (it was a one-shot token). */
+    private void deactivate(SpecialItem item) {
+        item.isActive = false
+        if (item.usesRemaining <= 0 && !item.isPermanent) {
+            def owner = item.owner
+            owner?.removeFromSpecialItems(item)
+            item.delete(failOnError: true)
+            owner?.save(failOnError: true)
+        } else {
+            item.save(failOnError: true)
+        }
+    }
+
+    /**
+     * The single bit-reward modifier chokepoint. Reward sites call this when granting bits so the
+     * BIT_MULTIPLIER effect is honored in exactly one place (DRY) rather than scattered.
+     * Routed sites are genuine rewards: defrag kills (via LambdaPlayerService.addBits), passive
+     * mining, and the SWAP_SPACE absorb. Deliberately NOT routed: merchant sell payouts and the
+     * daily login bonus — a player shouldn't have a "next reward" multiplier silently eaten by a
+     * shop sale or login. Consumes the multiplier on the first positive grant.
+     */
+    int applyBitModifiers(LambdaPlayer player, int baseAmount) {
+        if (baseAmount > 0 && hasActiveEffect(player, 'BIT_MULTIPLIER')) {
+            consumeEffect(player, 'BIT_MULTIPLIER')
+            return baseAmount * 2
+        }
+        return baseAmount
+    }
+
+    /** Consume an active RESPAWN_CACHE and return its cached coordinate, or null if none active. */
+    Map consumeRespawnCache(LambdaPlayer player) {
+        Map coords = null
+        SpecialItem.withTransaction {
+            def item = SpecialItem.findByOwnerAndItemTypeAndIsActive(player, 'RESPAWN_CACHE', true)
+            if (item) {
+                if (!(item.expiresAt && item.expiresAt < new Date()) && item.cacheX != null) {
+                    coords = [x: item.cacheX, y: item.cacheY, level: item.cacheLevel]
+                }
+                deactivate(item)
+            }
+        }
+        return coords
+    }
 
     def createSpecialItem(LambdaPlayer player, String itemType) {
         println "DEBUG SpecialItemService: Creating item type '${itemType}' for player ${player.displayName}"
@@ -65,7 +137,12 @@ class SpecialItemService {
         if (!item) {
             return [success: false, message: "Item '${itemName}' not found in inventory"]
         }
-        
+
+        // A lingering one-shot effect is already armed — don't re-arm (would drive uses negative).
+        if (item.isActive && !item.isExpired()) {
+            return [success: false, message: "${item.name} is already active"]
+        }
+
         if (!item.isActive && item.usesRemaining <= 0) {
             return [success: false, message: "${item.name} has no uses remaining"]
         }
@@ -81,25 +158,32 @@ class SpecialItemService {
         if (result.success) {
             LambdaPlayer.withTransaction {
                 def managedPlayer = LambdaPlayer.get(player.id)
-                def managedItem = managedPlayer.specialItems.find { it.id == item.id }
+                def managedItem = managedPlayer.specialItems.findAll { it != null }.find { it.id == item.id }
                 
                 if (managedItem && !managedItem.isPermanent) {
                     managedItem.usesRemaining -= 1
                     managedItem.lastUsed = new Date()
-                    
+
                     if (itemData.duration > 0) {
+                        // Lingering effect: keep the row alive as the active-effect token (even at 0 uses);
+                        // a consumer will consumeEffect() it, or it auto-deactivates when expiresAt passes.
                         managedItem.isActive = true
                         managedItem.expiresAt = new Date(System.currentTimeMillis() + (itemData.duration * 1000))
-                    }
-                    
-                    if (managedItem.usesRemaining <= 0 && !managedItem.isPermanent) {
+                        if (result.cacheX != null) {
+                            managedItem.cacheX = result.cacheX
+                            managedItem.cacheY = result.cacheY
+                            managedItem.cacheLevel = result.cacheLevel
+                        }
+                        managedItem.save(failOnError: true)
+                    } else if (managedItem.usesRemaining <= 0) {
+                        // Instant, one-shot effect with no window: consume immediately.
                         managedPlayer.removeFromSpecialItems(managedItem)
                         managedItem.delete()
                         result.message += " (Item consumed)"
                     } else {
                         managedItem.save(failOnError: true)
                     }
-                    
+
                     managedPlayer.save(failOnError: true)
                 }
             }
@@ -140,7 +224,7 @@ class SpecialItemService {
             // Item expired, deactivate it
             LambdaPlayer.withTransaction {
                 def managedPlayer = LambdaPlayer.get(player.id)
-                def managedItem = managedPlayer.specialItems.find { it.id == item.id }
+                def managedItem = managedPlayer.specialItems.findAll { it != null }.find { it.id == item.id }
                 if (managedItem) {
                     managedItem.isActive = false
                     managedItem.save(failOnError: true)
@@ -152,35 +236,25 @@ class SpecialItemService {
         return status
     }
     
+    // O(1) ability dispatch by itemType (replaces the old switch). Each handler is a method reference.
+    private final Map<String, Closure> itemAbilityHandlers = [
+        'SCANNER_BOOST':     this.&executeScannerBoost,
+        'STEALTH_CLOAK':     this.&executeStealthCloak,
+        'BIT_MULTIPLIER':    this.&executeBitMultiplier,
+        'RESPAWN_CACHE':     this.&executeRespawnCache,
+        'SWAP_SPACE':        this.&executeSwapSpace,
+        'DEFRAG_DETECTOR':   this.&executeDefragDetector,
+        'LOGIC_AMPLIFIER':   this.&executeLogicAmplifier,
+        'MATRIX_MAPPER':     this.&executeMatrixMapper,
+        'ENTROPY_STABILIZER':this.&executeEntropyStabilizer,
+        'FRAGMENT_MAGNET':   this.&executeFragmentMagnet,
+        'MATRIX_CLIPPER':    this.&executeMatrixClipper,
+        'INSTANT_REPAIR_KIT':this.&executeInstantRepairKit
+    ]
+
     private def executeItemAbility(LambdaPlayer player, SpecialItem item, Map itemData) {
-        switch (item.itemType) {
-            case 'SCANNER_BOOST':
-                return executeScannerBoost(player)
-            case 'STEALTH_CLOAK':
-                return executeStealthCloak(player)
-            case 'BIT_MULTIPLIER':
-                return executeBitMultiplier(player)
-            case 'RESPAWN_CACHE':
-                return executeRespawnCache(player)
-            case 'SWAP_SPACE':
-                return executeSwapSpace(player)
-            case 'DEFRAG_DETECTOR':
-                return executeDefragDetector(player)
-            case 'LOGIC_AMPLIFIER':
-                return executeLogicAmplifier(player)
-            case 'MATRIX_MAPPER':
-                return executeMatrixMapper(player)
-            case 'ENTROPY_STABILIZER':
-                return executeEntropyStabilizer(player)
-            case 'FRAGMENT_MAGNET':
-                return executeFragmentMagnet(player)
-            case 'MATRIX_CLIPPER':
-                return executeMatrixClipper(player)
-            case 'INSTANT_REPAIR_KIT':
-                return executeInstantRepairKit(player)
-            default:
-                return [success: false, message: "Unknown item ability: ${item.itemType}"]
-        }
+        def handler = itemAbilityHandlers[item.itemType]
+        return handler ? handler.call(player) : [success: false, message: "Unknown item ability: ${item.itemType}"]
     }
     
     private def executeScannerBoost(LambdaPlayer player) {
@@ -411,7 +485,8 @@ class SpecialItemService {
         LambdaPlayer.withTransaction {
             def managedPlayer = LambdaPlayer.get(player.id)
             if (managedPlayer?.specialItems) {
-                foundItem = managedPlayer.specialItems.find { item ->
+                // GORM hasMany collections can contain null refs — filter before dereferencing (CLAUDE.md).
+                foundItem = managedPlayer.specialItems.findAll { it != null }.find { item ->
                     item.name.toLowerCase().replace(' ', '_') == itemName.toLowerCase() ||
                     item.name.toLowerCase() == itemName.toLowerCase()
                 }
@@ -434,7 +509,7 @@ class SpecialItemService {
                 name: 'Stealth Cloak',
                 description: 'Provides 75% chance to avoid defrag bot encounters for next movement',
                 maxUses: 1,
-                duration: 0,
+                duration: 120,   // ~2 min window for the next move
                 isPermanent: false,
                 rarity: 'UNCOMMON'
             ],
@@ -442,7 +517,7 @@ class SpecialItemService {
                 name: 'Bit Multiplier',
                 description: 'Doubles the next bit reward received',
                 maxUses: 1,
-                duration: 0,
+                duration: 300,   // window in which the next bit reward is doubled
                 isPermanent: false,
                 rarity: 'RARE'
             ],
@@ -458,7 +533,7 @@ class SpecialItemService {
                 name: 'Swap Space',
                 description: 'Blocks next defrag attempt and converts to +50 bits',
                 maxUses: 1,
-                duration: 0,
+                duration: 300,   // window in which the next defrag attempt is blocked
                 isPermanent: false,
                 rarity: 'EPIC'
             ],
@@ -474,7 +549,7 @@ class SpecialItemService {
                 name: 'Logic Amplifier',
                 description: 'Enhances next logic fragment pickup with +1 power level',
                 maxUses: 1,
-                duration: 0,
+                duration: 300,   // window in which the next pickup is amplified
                 isPermanent: false,
                 rarity: 'UNCOMMON'
             ],
@@ -504,9 +579,9 @@ class SpecialItemService {
             ],
             'MATRIX_CLIPPER': [
                 name: 'Matrix Clipper',
-                description: 'Allows clipping through damaged coordinates to advance to next matrix level',
+                description: 'Allows clipping through one damaged/inaccessible coordinate on your next move',
                 maxUses: 1,
-                duration: 0,
+                duration: 120,   // window for the next cc to bypass an accessibility block
                 isPermanent: false,
                 rarity: 'LEGENDARY'
             ],
@@ -533,24 +608,29 @@ class SpecialItemService {
     }
     
     private def executeInstantRepairKit(LambdaPlayer player) {
-        // Find nearby damaged coordinates to repair
-        def repairTargets = []
+        // Instantly restore every wiped/damaged coordinate in the 3x3 area (reuses CoordinateStateService).
+        def repaired = []
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
-                def scanX = Math.max(0, Math.min(9, player.positionX + dx))
-                def scanY = Math.max(0, Math.min(9, player.positionY + dy))
-                
-                // Check if coordinate needs repair (this will be implemented in CoordinateStateService)
-                // For now, return placeholder
-                repairTargets.add("(${scanX},${scanY})")
+                def x = Math.max(0, Math.min(9, player.positionX + dx))
+                def y = Math.max(0, Math.min(9, player.positionY + dy))
+                def health = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, x, y)
+                def hp = (health.health == null) ? 100 : health.health   // 0 is wiped, not "missing"
+                if (hp < 100) {
+                    coordinateStateService.repairCoordinate(player.currentMatrixLevel, x, y, 100)
+                    repaired.add("(${x},${y})")
+                }
             }
         }
-        
+
+        if (!repaired) {
+            // Nothing to repair → don't waste the use.
+            return [success: false, message: "No damaged coordinates within range to repair."]
+        }
         return [
             success: true,
-            message: "Instant repair kit activated! All coordinates in 3x3 area around your position have been restored to full operational status.",
-            effect: "instant_repair",
-            repairedCoordinates: repairTargets
+            message: "Instant repair kit activated! Restored ${repaired.size()} coordinate(s) to full operational status: ${repaired.join(', ')}",
+            effect: "instant_repair"
         ]
     }
 

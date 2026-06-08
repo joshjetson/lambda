@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> ## ⚠️ READ `STATUS.md` FIRST
+> This file contains aspirational/marketing claims that run **ahead of the actual code**.
+> `STATUS.md` is a code-verified feature matrix and is the source of truth. Key corrections:
+> - **Telnet port is 23**, not 8181.
+> - **Movement is `cc <x>,<y>` only** — there is no `move north/south/east/west` command.
+> - "Fully functional / all systems operational" claims below are often **partial or stubbed**
+>   (e.g. `recurse` is UI-only, 6 of 10 special items are inert, `trade` can't complete,
+>   `unlock_symbol` and the Logic Daemon endgame are unbuilt). See `STATUS.md` for the real state.
+
 ## Project Overview
 
 Lambda is a Grails-based hybrid board/computer game platform for Lambda, a multiplayer BBS door game. Lambda combines physical hardware (LEDs, GPIO) with digital gameplay via telnet connections. Players are electrical entities (Lambda race) navigating a physical board with LED position tracking, collecting logic fragments, and working to escape the system and invade the internet.
@@ -272,12 +281,12 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 - GPIO LED integration not yet implemented (placeholder methods in place)
 
 **Connection Details**:
-- Telnet: `telnet localhost 8181`
+- Telnet: `telnet localhost 23`
 - Web interface: `http://localhost:8080`
 - Database: H2 in-memory (development)
 
 **Gameplay Flow (v0.3)**:
-1. **Connect**: `telnet localhost 8181`
+1. **Connect**: `telnet localhost 23`
 2. **Authenticate**: Login or create new Lambda entity
 3. **Explore**: Use `move` commands to navigate matrix levels
 4. **Collect**: Use `scan` to find logic fragments, then `pickup` to collect them
@@ -298,7 +307,7 @@ The telnet server can be configured to run on custom ports through the TelnetSer
 **CRITICAL FOR CLAUDE**: NEVER use scripts for testing. ALWAYS telnet in interactively and play manually.
 
 ### **Interactive Testing Protocol**:
-1. **Connect**: `telnet localhost 8181`
+1. **Connect**: `telnet localhost 23`
 2. **Create Character**: 
    - Press Enter to start
    - Enter username (or 'new')

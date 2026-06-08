@@ -177,7 +177,7 @@ class AutoDefragService {
     private void broadcastDefragAlert(String message) {
         try {
             // Broadcast to mingle chamber if available
-            chatService?.broadcastSystemMessage(message)
+            chatService.sendSystemMessage(message)
         } catch (Exception e) {
             println "Could not broadcast defrag alert: ${e.message}"
         }

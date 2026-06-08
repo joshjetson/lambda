@@ -18,7 +18,8 @@ class DefragBot {
     String stolenFragmentName
     String stolenFragmentType
     Integer stolenFragmentPowerLevel
-    
+    Boolean isDaemon = false   // the Logic Daemon boss encounter (vs an ordinary defrag bot)
+
     static constraints = {
         matrixLevel min: 1, max: 10
         sector min: 1, max: 12

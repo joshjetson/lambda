@@ -15,6 +15,9 @@ class SimpleRepairService {
     
     def coordinateStateService
     def gameSessionService
+    def lambdaPlayerService
+
+    static final int REPAIR_REWARD_BITS = 30
     
     // Active repair sessions by player username
     private static Map<String, RepairSession> activeSessions = new ConcurrentHashMap<>()
@@ -144,7 +147,8 @@ class SimpleRepairService {
     }
 
 
-    private Map completeRepair(RepairSession session) {
+    // Package-visible (not private) so integration tests can drive winner/loser branches deterministically.
+    Map completeRepair(RepairSession session) {
         // Stop cycling
         if (session.cyclingTask) {
             session.cyclingTask.cancel(false)
@@ -157,12 +161,32 @@ class SimpleRepairService {
         def y = session.targetY
 
         if (session.isCorrect()) {
-            // Successful repair
-            CoordinateState.withTransaction {
-                coordinateStateService.repairCoordinate(session.matrixLevel, session.targetX, session.targetY, 100)
+            // Atomically claim the coordinate — only the FIRST entity to finish wins it.
+            def won = coordinateStateService.tryClaimRepair(session.matrixLevel, session.targetX, session.targetY)
+
+            if (!won) {
+                // Someone else repaired it first: kick this entity out with no prize (the HEAD-commit TODO).
+                result.success = false
+                result.message = new BoxBuilder(40)
+                        .addCenteredLine("REPAIR PRE-EMPTED")
+                        .addSeparator()
+                        .addLine("  Another entity completed the")
+                        .addLine("  repair of (${x},${y}) first.")
+                        .addEmptyLine()
+                        .addLine("  No prize awarded.")
+                        .build()
+                result.gameWon = false
+                stopRepairSession(session.playerUsername)
+                return result
             }
 
-            // Using BoxBuilder
+            // Winner: grant the bit reward through the single chokepoint (honors BIT_MULTIPLIER).
+            def reward = 0
+            def player = LambdaPlayer.findByUsername(session.playerUsername)
+            if (player) {
+                reward = lambdaPlayerService.addBits(player, REPAIR_REWARD_BITS)
+            }
+
             def box = new BoxBuilder(40)
                     .addCenteredLine("REPAIR SUCCESSFUL!")
                     .addSeparator()
@@ -170,7 +194,7 @@ class SimpleRepairService {
                     .addLine("  Your Result: ${keyCode}")
                     .addEmptyLine()
                     .addLine("  ✅ (${x},${y}) is now accessible!")
-                    .addLine("     Repair protocols completed.")
+                    .addLine("  💰 Reward: +${reward} bits")
                     .build()
 
             result.message = box

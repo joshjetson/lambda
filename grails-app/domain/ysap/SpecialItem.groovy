@@ -13,7 +13,12 @@ class SpecialItem {
     Date obtainedDate = new Date()
     Date expiresAt
     Date lastUsed
-    
+
+    // Cached respawn location for RESPAWN_CACHE (set on use), nullable for all other types
+    Integer cacheX
+    Integer cacheY
+    Integer cacheLevel
+
     LambdaPlayer owner
     
     static belongsTo = [owner: LambdaPlayer]
@@ -41,6 +46,9 @@ class SpecialItem {
         rarity inList: ['COMMON', 'UNCOMMON', 'RARE', 'EPIC', 'LEGENDARY']
         expiresAt nullable: true
         lastUsed nullable: true
+        cacheX nullable: true
+        cacheY nullable: true
+        cacheLevel nullable: true
     }
     
     static mapping = {

@@ -10,3 +10,6 @@ out/
 .project
 .settings
 .classpath
+
+# Generated UI capture artifacts
+uishots/

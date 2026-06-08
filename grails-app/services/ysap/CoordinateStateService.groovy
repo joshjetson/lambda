@@ -8,6 +8,7 @@ class CoordinateStateService {
     def lambdaPlayerService
     def defragBotService
     def telnetServerService
+    def specialItemService
 
     def getOrCreateCoordinateState(Integer matrixLevel, Integer x, Integer y) {
         def coordinate = CoordinateState.findByMatrixLevelAndCoordinateXAndCoordinateY(matrixLevel, x, y)
@@ -72,6 +73,34 @@ class CoordinateStateService {
         }
     }
     
+    /**
+     * Atomically claim a wiped coordinate for repair. The conditional UPDATE (`where health <= 0`)
+     * is the single race-resolution point: under concurrent repairs exactly one caller's UPDATE
+     * affects the row, so exactly one wins. Returns true if THIS call performed the repair, false if
+     * the coordinate was already repaired by someone else (the loser path — caller grants no prize).
+     */
+    boolean tryClaimRepair(Integer matrixLevel, Integer x, Integer y) {
+        boolean claimed = false
+        CoordinateState.withTransaction {
+            getOrCreateCoordinateState(matrixLevel, x, y)   // ensure the row exists
+            CoordinateState.withSession { it.flush() }       // push pending damage so the bulk UPDATE sees it
+            int updated = CoordinateState.executeUpdate(
+                "update CoordinateState c set c.health = 100, c.isAccessible = true, c.lastRepaired = :now " +
+                "where c.matrixLevel = :lvl and c.coordinateX = :x and c.coordinateY = :y and c.health <= 0",
+                [now: new Date(), lvl: matrixLevel, x: x, y: y])
+            claimed = (updated == 1)
+        }
+        return claimed
+    }
+
+    /** Parse an "INITIATE_REPAIR:x,y" signal (produced by handleRepairCommand) into [x, y],
+     *  or null if `result` isn't a repair-initiation. Single source for all 3 consumer sites. */
+    Integer[] parseRepairInitiation(String result) {
+        if (!result?.startsWith("INITIATE_REPAIR:")) return null
+        def coords = result.split(":")[1].split(",")
+        return [Integer.parseInt(coords[0].trim()), Integer.parseInt(coords[1].trim())] as Integer[]
+    }
+
     def processDefragDegradation() {
         def now = new Date()
         def coordinatesToDegrade = CoordinateState.findAllByNextDegradationLessThanAndHealthGreaterThan(now, 0)
@@ -190,14 +219,16 @@ class CoordinateStateService {
                 return result
             }
             
-            // Perform the repair
-            def coordinate = repairCoordinate(player.currentMatrixLevel, targetX, targetY, 100)
-            
+            // Perform the repair through the atomic claim so two players can't both win the same coord.
+            if (!tryClaimRepair(player.currentMatrixLevel, targetX, targetY)) {
+                result.message = "Coordinate (${targetX},${targetY}) was already repaired by another entity."
+                return result
+            }
+
             result.success = true
             result.message = "✅ Coordinate (${targetX},${targetY}) successfully repaired!"
-            result.coordinateHealth = coordinate.health
-            result.coordinateStatus = coordinate.getHealthStatus()
-            
+            result.coordinateHealth = 100
+
             println "Player ${player.username} repaired coordinate (${targetX},${targetY}) on Matrix Level ${player.currentMatrixLevel}"
         }
         
@@ -306,7 +337,12 @@ class CoordinateStateService {
         // Check if coordinate change is allowed (accessibility)
         def movementCheck = this.canPlayerMoveToCoordinate(player, newX, newY)
         if (!movementCheck.allowed) {
-            return TerminalFormatter.formatText("Coordinate change blocked: ${movementCheck.reason}", 'bold', 'red')
+            // MATRIX_CLIPPER: spend an active clipper to bypass one accessibility block.
+            if (specialItemService.hasActiveEffect(player, 'MATRIX_CLIPPER')) {
+                specialItemService.consumeEffect(player, 'MATRIX_CLIPPER')
+            } else {
+                return TerminalFormatter.formatText("Coordinate change blocked: ${movementCheck.reason}", 'bold', 'red')
+            }
         }
 
         // Calculate movement direction for audio feedback
@@ -371,14 +407,23 @@ class CoordinateStateService {
         // Safe zone: No defrag bots in starting area
         def inSafeZone = (newX <= 1 && newY <= 1)
 
-        // Apply recursion stealth bonus (if active) and roll for encounter
-        def totalAvoidanceBonus = (player.stealthBonus ?: 0.0) // Only active recursion bonuses count
+        // Apply active recursion bonuses (stealth + defend) and roll for encounter.
+        // Bonuses only count while the recursion effect window is open (gated centrally).
+        def totalAvoidanceBonus = lambdaPlayerService.recursionEffectActive(player) ?
+                ((player.stealthBonus ?: 0.0) + (player.defragResistanceBonus ?: 0.0)) : 0.0
         def encounterChance = baseEncounterChance * (1.0 - Math.min(0.8, totalAvoidanceBonus))
+
+        // STEALTH_CLOAK: spend an active cloak to cut this move's encounter chance by 75%.
+        if (!inSafeZone && specialItemService.hasActiveEffect(player, 'STEALTH_CLOAK')) {
+            encounterChance *= 0.25
+            specialItemService.consumeEffect(player, 'STEALTH_CLOAK')
+        }
 
         if (!inSafeZone && Math.random() < encounterChance) {
             def defragBot = defragBotService.spawnDefragBot(player.currentMatrixLevel, 1, newX, newY)
             if (defragBot) {
                 telnetServerService.activeDefragSessions[writer] = defragBot
+                defragBotService.startEncounterTimer(defragBot, player)   // auto-resolve if ignored past timeLimit
 
                 def encounter = new StringBuilder()
                 encounter.append(TerminalFormatter.formatText("Lambda entity changed coordinates to (${newX},${newY})", 'bold', 'green')).append('\r\n')

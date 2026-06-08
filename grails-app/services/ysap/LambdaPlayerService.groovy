@@ -9,6 +9,7 @@ class LambdaPlayerService {
     def gameSessionService
     def audioService
     def coordinateStateService
+    def specialItemService
     def lambdaMerchantService
     def puzzleService
 
@@ -87,14 +88,18 @@ class LambdaPlayerService {
         return LambdaPlayer.findAllByCurrentMatrixLevel(matrixLevel)
     }
     
-    def addBits(LambdaPlayer player, Integer amount) {
+    /** Grants bits through the single reward chokepoint and returns the actual amount granted
+     *  (post BIT_MULTIPLIER), so callers can display a truthful "+N bits". */
+    Integer addBits(LambdaPlayer player, Integer amount) {
+        def granted = specialItemService.applyBitModifiers(player, amount ?: 0)
         LambdaPlayer.withTransaction {
             def managedPlayer = LambdaPlayer.get(player.id)
             if (managedPlayer) {
-                managedPlayer.bits += amount
+                managedPlayer.bits += granted
                 managedPlayer.save(failOnError: true)
             }
         }
+        return granted
     }
     
     def deductBits(LambdaPlayer player, Integer amount) {
@@ -107,6 +112,62 @@ class LambdaPlayerService {
             }
             return false
         }
+    }
+
+    /**
+     * Atomic standard-fragment trade: charge the buyer `price` (reusing deductBits), credit the
+     * seller, and move `qty` of the seller's fragment to the buyer (quantity-stacking like pickup).
+     * Returns [success, message]. Owns fragment + bit movement so callers stay 1-line.
+     */
+    Map transferFragment(LambdaPlayer seller, LambdaPlayer buyer, Long fragmentId, int qty, int price) {
+        def result = [success: false, message: '']
+        if (qty < 1) { result.message = 'Quantity must be at least 1'; return result }
+        LambdaPlayer.withTransaction {
+            def mSeller = LambdaPlayer.get(seller.id)
+            def mBuyer = LambdaPlayer.get(buyer.id)
+            def frag = LogicFragment.get(fragmentId)
+            if (!mSeller || !mBuyer) { result.message = 'Entity not found'; return }
+            if (!frag || frag.owner?.id != mSeller.id) { result.message = 'Fragment no longer available'; return }
+            int have = (frag.quantity ?: 1)
+            if (have < qty) { result.message = "${mSeller.displayName} only has x${have} of ${frag.name}"; return }
+            if ((mBuyer.bits ?: 0) < price) { result.message = "${mBuyer.displayName} can't afford ${price} bits"; return }
+
+            // snapshot fragment fields BEFORE any seller-side delete
+            def fName = frag.name, fDesc = frag.description, fType = frag.fragmentType
+            def fPower = frag.powerLevel, fCap = frag.pythonCapability
+
+            // charge buyer (reuse deductBits), credit seller
+            if (!deductBits(mBuyer, price)) { result.message = 'Payment failed'; return }
+            mSeller.bits = (mSeller.bits ?: 0) + price
+            mSeller.save(failOnError: true)
+
+            // seller side: decrement or remove
+            if (have <= qty) {
+                mSeller.removeFromLogicFragments(frag)
+                frag.delete(failOnError: true)
+            } else {
+                frag.quantity = have - qty
+                frag.save(failOnError: true)
+            }
+
+            // buyer side: stack onto an existing copy or create a new one
+            def existing = mBuyer.logicFragments?.findAll { it != null }?.find { it.name == fName }
+            if (existing) {
+                existing.quantity = (existing.quantity ?: 1) + qty
+                existing.save(failOnError: true)
+            } else {
+                def nf = new LogicFragment(name: fName, description: fDesc, fragmentType: fType,
+                        powerLevel: fPower, pythonCapability: fCap, quantity: qty, isActive: true,
+                        discoveredDate: new Date(), owner: mBuyer)
+                nf.save(failOnError: true)
+                mBuyer.addToLogicFragments(nf)
+            }
+            mBuyer.save(failOnError: true)
+
+            result.success = true
+            result.message = "Traded x${qty} ${fName} for ${price} bits"
+        }
+        return result
     }
     
     def setMingleStatus(LambdaPlayer player, Boolean inMingle) {
@@ -462,20 +523,27 @@ class LambdaPlayerService {
             if (managedPlayer) {
                 status.append("Logic Fragments: ${managedPlayer.logicFragments?.size() ?: 0}\r\n")
                 status.append("Special Items: ${managedPlayer.specialItems?.size() ?: 0}\r\n")
+                status.append("Recursion Charges: ${managedPlayer.recursionCharges ?: 0}/${managedPlayer.maxRecursionCharges ?: 0}\r\n")
+                if (recursionEffectActive(managedPlayer)) {
+                    long leftS = ((managedPlayer.recursionEffectExpires.time - System.currentTimeMillis()) / 1000) as long
+                    status.append("Active Recursion: ${TerminalFormatter.formatText("${managedPlayer.activeRecursionEffect} (${leftS}s)", 'bold', 'magenta')}\r\n")
+                }
             } else {
                 status.append("Logic Fragments: 0\r\n")
                 status.append("Special Items: 0\r\n")
             }
         }
 
-        // Show ethnicity bonuses if player has any
+        // Show active recursion bonuses (only meaningful while the effect window is open)
         def bonuses = []
-        if (player.fragmentDetectionBonus > 0) bonuses.add("Enhanced Scan (+${Math.round(player.fragmentDetectionBonus * 100)}%)")
-        if (player.defragResistanceBonus > 0) bonuses.add("Defrag Resistance (+${Math.round(player.defragResistanceBonus * 100)}%)")
-        if (player.movementRangeBonus > 0) bonuses.add("Movement Range (+${player.movementRangeBonus})")
-        if (player.miningEfficiencyBonus > 0) bonuses.add("Mining Efficiency (+${Math.round(player.miningEfficiencyBonus * 100)}%)")
-        if (player.stealthBonus > 0) bonuses.add("Stealth (+${Math.round(player.stealthBonus * 100)}%)")
-        if (player.fusionSuccessBonus > 0) bonuses.add("Fusion Success (+${Math.round(player.fusionSuccessBonus * 100)}%)")
+        if (recursionEffectActive(player)) {
+            if (player.fragmentDetectionBonus > 0) bonuses.add("Enhanced Scan (+${Math.round(player.fragmentDetectionBonus * 100)}%)")
+            if (player.defragResistanceBonus > 0) bonuses.add("Defrag Resistance (+${Math.round(player.defragResistanceBonus * 100)}%)")
+            if (player.movementRangeBonus > 0) bonuses.add("Movement Range (+${player.movementRangeBonus})")
+            if (player.miningEfficiencyBonus > 0) bonuses.add("Mining Efficiency (+${Math.round(player.miningEfficiencyBonus * 100)}%)")
+            if (player.stealthBonus > 0) bonuses.add("Stealth (+${Math.round(player.stealthBonus * 100)}%)")
+            if (player.fusionSuccessBonus > 0) bonuses.add("Fusion Success (+${Math.round(player.fusionSuccessBonus * 100)}%)")
+        }
 
         if (bonuses) {
             status.append("Ethnicity Bonuses: ${TerminalFormatter.formatText(bonuses.join(', '), 'bold', 'magenta')}\r\n")
@@ -837,69 +905,77 @@ class LambdaPlayerService {
 
     // ===== RECURSE COMMAND HANDLER (moved from TelnetServerService) =====
 
-    String handleRecurseCommand(String ability, LambdaPlayer player, PrintWriter writer) {
-        // Check if player has recursion charges available
-        LambdaPlayer.withTransaction {
-            def managedPlayer = LambdaPlayer.get(player.id)
-            if (!managedPlayer) {
-                return "Player not found\r\n"
-            }
-            
-            // Check recursion cooldown and charges (TODO: implement tracking fields)
-            // For now, return a placeholder implementation
-            def ethnicity = managedPlayer.avatarSilhouette
-            
-            switch (ability.toLowerCase()) {
-                case 'movement':
-                    if (ethnicity == 'GEOMETRIC_ENTITY') {
-                        return handleRecursiveMovement(managedPlayer, writer)
-                    }
-                    return "Movement recursion not available for your ethnicity\r\n"
-                    
-                case 'fusion':
-                    if (ethnicity == 'CLASSIC_LAMBDA') {
-                        return "Fusion recursion activated - next fragment fusion has +15% success rate\r\n"
-                    }
-                    return "Fusion recursion not available for your ethnicity\r\n"
-                    
-                case 'defend':
-                    if (ethnicity == 'CIRCUIT_PATTERN') {
-                        return "Defense recursion activated - next defrag encounter has +15% resistance\r\n"
-                    }
-                    return "Defense recursion not available for your ethnicity\r\n"
-                    
-                case 'mine':
-                    if (ethnicity == 'FLOWING_CURRENT') {
-                        return "Mining recursion activated - next mining cycle has +25% efficiency\r\n"
-                    }
-                    return "Mining recursion not available for your ethnicity\r\n"
-                    
-                case 'stealth':
-                    if (ethnicity == 'DIGITAL_GHOST') {
-                        return "Stealth recursion activated - enhanced defrag avoidance for 10 minutes\r\n"
-                    }
-                    return "Stealth recursion not available for your ethnicity\r\n"
-                    
-                case 'process':
-                    if (ethnicity == 'BINARY_FORM') {
-                        return "Processing recursion activated - cooldowns reduced for 5 minutes\r\n"
-                    }
-                    return "Processing recursion not available for your ethnicity\r\n"
-                    
-                default:
-                    return "Unknown recursion ability. Available: movement, fusion, defend, mine, stealth, process\r\n"
-            }
-        }
+    private static final long RECURSION_COOLDOWN_MS = 3 * 60 * 1000   // base cooldown between recursions
+
+    // O(1), ethnicity-locked ability registry. Each `apply` closure sets the TEMPORARY bonus its
+    // consumer already reads (gated by recursionEffectActive): fusion/mine/stealth are live; defend
+    // is wired into the encounter avoidance calc; movement sets movementRangeBonus (consumed by the
+    // Phase 10 move system); process shortens the recursion cooldown (see recursionCooldownFor).
+    private static final Map<String, Map> RECURSE_ABILITIES = [
+        fusion:   [ethnicity: 'CLASSIC_LAMBDA',   durationMs: 10L * 60 * 1000, label: '+15% fragment fusion success',
+                   apply: { LambdaPlayer p -> p.fusionSuccessBonus = 0.15d }],
+        defend:   [ethnicity: 'CIRCUIT_PATTERN',  durationMs: 10L * 60 * 1000, label: '+15% defrag resistance',
+                   apply: { LambdaPlayer p -> p.defragResistanceBonus = 0.15d }],
+        movement: [ethnicity: 'GEOMETRIC_ENTITY', durationMs: 10L * 60 * 1000, label: '+2 movement range',
+                   apply: { LambdaPlayer p -> p.movementRangeBonus = 2 }],
+        mine:     [ethnicity: 'FLOWING_CURRENT',  durationMs: 10L * 60 * 1000, label: '+25% mining efficiency',
+                   apply: { LambdaPlayer p -> p.miningEfficiencyBonus = 0.25d }],
+        stealth:  [ethnicity: 'DIGITAL_GHOST',    durationMs: 10L * 60 * 1000, label: '+30% defrag avoidance',
+                   apply: { LambdaPlayer p -> p.stealthBonus = 0.30d }],
+        process:  [ethnicity: 'BINARY_FORM',      durationMs: 5L * 60 * 1000,  label: 'reduced recursion cooldown',
+                   apply: { LambdaPlayer p -> /* effect honored in recursionCooldownFor while active */ }]
+    ]
+
+    /** True while a recursion effect is within its active window — the single expiry gate. */
+    boolean recursionEffectActive(LambdaPlayer p) {
+        p?.recursionEffectExpires != null && p.recursionEffectExpires.time > System.currentTimeMillis()
     }
-    
-    private String handleRecursiveMovement(LambdaPlayer player, PrintWriter writer) {
-        // Enhanced movement allows 2-3 coordinate jump
-        writer.println("Enhanced movement mode activated!")
-        writer.print("Enter target coordinates for recursive movement (x,y): ")
-        writer.flush()
-        
-        // TODO: Implement proper input handling for recursive movement
-        return "Recursive movement ready - next cc command will jump 2-3 coordinates\r\n"
+
+    /** Binary Form's `process` recursion halves the cooldown while it is active. */
+    private long recursionCooldownFor(LambdaPlayer p) {
+        boolean processActive = p.activeRecursionEffect == 'process' && recursionEffectActive(p)
+        return processActive ? (RECURSION_COOLDOWN_MS / 2L) as long : RECURSION_COOLDOWN_MS
+    }
+
+    String handleRecurseCommand(String ability, LambdaPlayer player, PrintWriter writer) {
+        def key = ability?.toLowerCase()?.trim()
+        def ab = RECURSE_ABILITIES[key]
+        if (!ab) {
+            return "Unknown recursion ability. Available: ${RECURSE_ABILITIES.keySet().join(', ')}\r\n"
+        }
+
+        String result = ""
+        LambdaPlayer.withTransaction {
+            def p = LambdaPlayer.get(player.id)
+            if (!p) { result = "Player not found\r\n"; return }
+
+            if (p.avatarSilhouette != ab.ethnicity) {
+                result = "${key.capitalize()} recursion is not available for your ethnicity\r\n"
+                return
+            }
+            if ((p.recursionCharges ?: 0) <= 0) {
+                result = TerminalFormatter.formatText("No recursion charges left — refills on entropy refresh.", 'bold', 'red') + "\r\n"
+                return
+            }
+            long cooldown = recursionCooldownFor(p)
+            if (p.lastRecursionUse && (System.currentTimeMillis() - p.lastRecursionUse.time) < cooldown) {
+                long leftS = ((cooldown - (System.currentTimeMillis() - p.lastRecursionUse.time)) / 1000) as long
+                result = TerminalFormatter.formatText("Recursion on cooldown (${leftS}s remaining)", 'bold', 'yellow') + "\r\n"
+                return
+            }
+
+            (ab.apply as Closure).call(p)                                   // set the temporary bonus
+            p.activeRecursionEffect = key
+            p.recursionEffectExpires = new Date(System.currentTimeMillis() + (ab.durationMs as long))
+            p.recursionCharges = (p.recursionCharges ?: 0) - 1
+            p.lastRecursionUse = new Date()
+            p.save(failOnError: true)
+
+            audioService?.playSound("special_item_use")
+            result = TerminalFormatter.formatText("⟳ ${key.capitalize()} recursion activated", 'bold', 'green') +
+                     " — ${ab.label} (charges: ${p.recursionCharges}/${p.maxRecursionCharges})\r\n"
+        }
+        return result
     }
 
     private String viewPythonEnvironment(LambdaPlayer player) {
@@ -1138,12 +1214,18 @@ class LambdaPlayerService {
                         }
                     }
                 } else {
+                    // LOGIC_AMPLIFIER: if active, the next picked-up fragment gains +1 power level.
+                    def power = fragment.powerLevel
+                    if (specialItemService.hasActiveEffect(player, 'LOGIC_AMPLIFIER')) {
+                        power = Math.min(10, (power ?: 1) + 1)
+                        specialItemService.consumeEffect(player, 'LOGIC_AMPLIFIER')
+                    }
                     // Create new fragment entry
                     def newFragment = new LogicFragment(
                         name: fragment.name,
                         description: fragment.description,
                         fragmentType: fragment.fragmentType,
-                        powerLevel: fragment.powerLevel,
+                        powerLevel: power,
                         pythonCapability: fragment.pythonCapability,
                         quantity: 1,
                         isActive: true,

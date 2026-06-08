@@ -8,6 +8,8 @@ import groovy.json.JsonSlurper
 class EntropyService {
 
     def audioService
+    def lambdaPlayerService
+    def specialItemService
 
     String getEntropyColor(Double entropy) {
         def safeEntropy = entropy ?: 100.0
@@ -25,7 +27,13 @@ class EntropyService {
         def lastRefresh = player.lastEntropyRefresh ?: player.createdDate ?: now
         def safeLastRefresh = lastRefresh ?: now
         def hoursOffline = (now.time - safeLastRefresh.time) / (1000 * 60 * 60)
-        
+
+        // ENTROPY_STABILIZER: while active, digital coherence does not decay.
+        if (specialItemService.hasActiveEffect(player, 'ENTROPY_STABILIZER')) {
+            def held = (player.entropy ?: 100.0) as Double
+            return [currentEntropy: held, hoursOffline: Math.max(0.0, (hoursOffline ?: 0.0) as Double).round(1), entropyLoss: 0.0]
+        }
+
         // Entropy decays 2% per hour offline (aggressive to encourage daily login)
         def decayRate = 2.0
         def currentEntropy = (player.entropy ?: 100.0) as Double
@@ -99,8 +107,9 @@ class EntropyService {
                 }
                 
                 managedPlayer.bits += bonusBits
+                managedPlayer.recursionCharges = managedPlayer.maxRecursionCharges ?: 2   // daily recursion refill
                 managedPlayer.save(failOnError: true)
-                
+
                 result.success = true
                 result.message = "Digital entropy restored! Coherence: 100%"
                 result.rewards.bits = bonusBits
@@ -138,8 +147,8 @@ class EntropyService {
         def safeEntropyMultiplier = entropyMultiplier ?: 0.0
         def safeEffectiveHours = effectiveHours ?: 0.0
         
-        // Flowing Current bonus: +25% mining efficiency
-        def ethnicityBonus = 1.0 + (player.miningEfficiencyBonus ?: 0.0)
+        // Flowing Current `recurse mine` bonus: +25% mining efficiency (only while active)
+        def ethnicityBonus = 1.0 + (lambdaPlayerService.recursionEffectActive(player) ? (player.miningEfficiencyBonus ?: 0.0) : 0.0)
         def bitsEarned = ((safeMiningRate * safeEntropyMultiplier * safeEffectiveHours * ethnicityBonus) ?: 0.0).toInteger()
         
         return [
@@ -162,17 +171,18 @@ class EntropyService {
         LambdaPlayer.withTransaction {
             def managedPlayer = LambdaPlayer.get(player.id)
             if (managedPlayer) {
-                managedPlayer.bits += miningResult.bitsEarned
+                def granted = specialItemService.applyBitModifiers(managedPlayer, miningResult.bitsEarned as int)
+                managedPlayer.bits += granted
                 managedPlayer.lastBitMining = new Date()
-                
+
                 // Update entropy after mining collection
                 def entropyDecay = calculateEntropyDecay(managedPlayer)
                 managedPlayer.entropy = entropyDecay.currentEntropy
-                
+
                 managedPlayer.save(failOnError: true)
-                
+
                 result.success = true
-                result.message = "Mining operation harvested ${miningResult.bitsEarned} bits"
+                result.message = "Mining operation harvested ${granted} bits"
                 result.rewards = miningResult
             }
         }
@@ -380,7 +390,7 @@ class EntropyService {
         // Calculate success rate based on quantity and ethnicity bonus
         def baseSuccessRate = 30  // 30% base
         def bonusRate = (targetFragment.quantity - 3) * 10  // +10% per extra fragment
-        def ethnicityBonus = (player.fusionSuccessBonus ?: 0.0) * 100  // Binary Form +15%
+        def ethnicityBonus = (lambdaPlayerService.recursionEffectActive(player) ? (player.fusionSuccessBonus ?: 0.0) : 0.0) * 100  // Classic Lambda `recurse fusion` +15% (only while active)
         def successRate = Math.min(95, baseSuccessRate + bonusRate + ethnicityBonus)  // Cap at 95%
         
         def success = Math.random() * 100 < successRate

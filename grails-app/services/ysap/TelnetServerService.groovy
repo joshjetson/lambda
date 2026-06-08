@@ -77,6 +77,12 @@ class TelnetServerService {
             'symbols': { player, command, parts, writer ->
                 elementalSymbolService.getPlayerSymbolStatus(player)
             },
+            'unlock_symbol': { player, command, parts, writer ->
+                elementalSymbolService.handleUnlockSymbolCommand(command, player)
+            },
+            'invoke': { player, command, parts, writer ->
+                elementalSymbolService.handleInvokeDaemonCommand(player, writer)
+            },
             'collect_var': { player, command, parts, writer ->
                 if (parts.length > 1) {
                     return puzzleService.handleCollectVariableCommand(parts[1], player)
@@ -182,11 +188,9 @@ class TelnetServerService {
                 def result = coordinateStateService.handleRepairCommand(command, player)
                 
                 // Special handling for repair mini-game initiation
-                if (result.startsWith("INITIATE_REPAIR:")) {
-                    def coords = result.split(":")[1].split(",")
-                    def targetX = Integer.parseInt(coords[0])
-                    def targetY = Integer.parseInt(coords[1])
-                    return initiateRepairMiniGame(player, targetX, targetY, writer)
+                def coords = coordinateStateService.parseRepairInitiation(result)
+                if (coords) {
+                    return initiateRepairMiniGame(player, coords[0], coords[1], writer)
                 }
                 
                 return result
@@ -749,6 +753,15 @@ class TelnetServerService {
             return chatService.handleChatCommand(command, refreshedPlayer, writer)
         }
 
+        return dispatchCommand(command, player, writer)
+    }
+
+    /**
+     * The shared command-map dispatch: O(1) lookup in `commandHandlers` + delegate, with the
+     * unknown-command fallback. Extracted so HUD mode reuses the exact same dispatch (Phase 9)
+     * instead of duplicating a subset in its own switch.
+     */
+    String dispatchCommand(String command, LambdaPlayer player, PrintWriter writer) {
         def parts = command.trim().toLowerCase().split(' ')
         def cmd = parts[0]
 
@@ -757,13 +770,10 @@ class TelnetServerService {
 
         if (handler) {
             return handler.call(player, command, parts, writer)
-        } else {
-            // Default case - command not found
-            audioService.playSound("error")
-            return "Unknown command: $command. Type 'help' for available commands.\r\n"
         }
-
-        //TODO: Put all the logic for each case in its respective service and out of this TelnetServerService
+        // Default case - command not found
+        audioService.playSound("error")
+        return "Unknown command: $command. Type 'help' for available commands.\r\n"
     }
     
 

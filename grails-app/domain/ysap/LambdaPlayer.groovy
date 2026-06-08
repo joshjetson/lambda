@@ -36,7 +36,15 @@ class LambdaPlayer {
     Double miningEfficiencyBonus = 0.0     // Flowing Current: +25% mining efficiency
     Double stealthBonus = 0.0              // Digital Ghost: +30% stealth bonus
     Double fusionSuccessBonus = 0.0        // Binary Form: +15% fusion success
-    
+
+    // Recursion ability economy — the bonus fields above are 0 by default and are set
+    // TEMPORARILY by `recurse <ability>`, expiring via recursionEffectExpires.
+    Integer recursionCharges = 2
+    Integer maxRecursionCharges = 2
+    Date lastRecursionUse
+    String activeRecursionEffect     // which ability's bonus is currently active (for expiry/clearing)
+    Date recursionEffectExpires
+
     List logicFragments
     List skills
     List specialItems
@@ -50,6 +58,7 @@ class LambdaPlayer {
     Boolean hasFireSymbol = false
     Boolean hasEarthSymbol = false
     Boolean hasWaterSymbol = false
+    Integer daemonsDefeated = 0   // Logic Daemons defeated (endgame progression)
     Date airSymbolAcquired
     Date fireSymbolAcquired
     Date earthSymbolAcquired
@@ -86,6 +95,11 @@ class LambdaPlayer {
         miningEfficiencyBonus min: 0.0d, max: 1.0d
         stealthBonus min: 0.0d, max: 1.0d
         fusionSuccessBonus min: 0.0d, max: 1.0d
+        recursionCharges min: 0
+        maxRecursionCharges min: 1
+        lastRecursionUse nullable: true
+        activeRecursionEffect nullable: true
+        recursionEffectExpires nullable: true
         airSymbolAcquired nullable: true
         fireSymbolAcquired nullable: true
         earthSymbolAcquired nullable: true

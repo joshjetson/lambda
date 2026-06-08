@@ -598,11 +598,11 @@ class HudService {
             def result = coordinateStateService.handleRepairCommand(command, player)
             
             // Check if this should initiate a mini-game
-            if (result.startsWith("INITIATE_REPAIR:")) {
-                def coords = result.split(":")[1].split(",")
-                def targetX = Integer.parseInt(coords[0])
-                def targetY = Integer.parseInt(coords[1])
-                
+            def repairCoords = coordinateStateService.parseRepairInitiation(result)
+            if (repairCoords) {
+                def targetX = repairCoords[0]
+                def targetY = repairCoords[1]
+
                 // Stop any existing repair session
                 simpleRepairService.stopRepairSession(player.username)
                 
@@ -722,101 +722,64 @@ class HudService {
     /**
      * Process game commands specifically for HUD mode
      */
+    // HUD-specific command overrides: commands whose HUD rendering/behavior differs from classic.
+    // Everything NOT here delegates to the shared TelnetServerService.commandHandlers map (Phase 9),
+    // so the ~37 previously-"not implemented" text commands now work in HUD. Map-dispatch, no switch.
+    private final Map<String, Closure> hudOverrides = [
+        'map':    { String c, LambdaPlayer p -> "Map is always visible in HUD mode (right side)" },
+        'm':      { String c, LambdaPlayer p -> "Map is always visible in HUD mode (right side)" },
+        'clear':  { String c, LambdaPlayer p -> "" },
+        'ls':     { String c, LambdaPlayer p -> hudLs(p) },
+        'help':   { String c, LambdaPlayer p -> hudHelp(c) },
+        'heap':   { String c, LambdaPlayer p -> hudHeap(p) },
+        'mingle': { String c, LambdaPlayer p -> hudHeap(p) },
+        // defrag combat needs the classic activeDefragSessions loop the HUD path can't service —
+        // do NOT delegate (would leak an orphaned session); tell the player to switch to classic.
+        'defrag': { String c, LambdaPlayer p -> TerminalFormatter.formatText("Defrag combat is not available in HUD mode — type 'normal' to switch to classic.", 'bold', 'yellow') }
+    ]
+
     private String processGameCommandForHud(String command, LambdaPlayer player) {
         if (!command || command.trim().isEmpty()) {
             return "Enter a command or type 'help' for available commands"
         }
-        
-        String[] parts = command.trim().toLowerCase().split(' ')
-        String cmd = parts[0]
-        
-        switch (cmd) {
-            case 'status':
-            case 's':
-                try {
-                    return lambdaPlayerService.getPlayerStatus(player)
-                } catch (Exception e) {
-                    return "Status command not implemented in HUD mode yet"
-                }
-            case 'scan':
-            case 'sc':
-                try {
-                    return gameSessionService.scanArea(player)
-                } catch (Exception e) {
-                    return "Scan command not implemented in HUD mode yet"
-                }
-            case 'cc':
-                String playerId = player.username
-                PrintWriter sessionWriter = hudSessionWriters[playerId]
-                return coordinateStateService.handleCoordinateChange(command, player, sessionWriter)
 
-            case 'help':
-                if (parts.length > 1) {
-                    return PlayerHelp.showHelp(parts[1], 45) // HUD mode width (reduced for better fit)
-                }
-                return PlayerHelp.showHelp(null, 45) // HUD mode width (reduced for better fit)
-            case 'inventory':
-            case 'i':
-                try {
-                    return lambdaPlayerService.showInventory(player)
-                } catch (Exception e) {
-                    return "Inventory command not implemented in HUD mode yet"
-                }
-                
-            case 'ls':
-                try {
-                    return getCompactFileList(player)
-                } catch (Exception e) {
-                    return "File listing not available: ${e.message}"
-                }
-                
-            case 'cat':
-                try {
-                    return lambdaPlayerService.handleCatCommand(command, player)
-                } catch (Exception e) {
-                    return "Cat command failed: ${e.message}"
-                }
-                
-            case 'heap':
-            case 'mingle':
-                String playerId = player.username
-                if (!playersInHeapMode[playerId]) {
-                    // Enter heap mode - replace map with chat
-                    playersInHeapMode[playerId] = true
-                    
-                    // Initialize chat mode
-                    try {
-                        chatService.enterChat(player, hudSessionWriters[playerId])
-                        // Load existing chat history
-                        refreshChatHistory(playerId)
-                    } catch (Exception e) {
-                        // Continue even if chat service fails
-                        heapChatHistory[playerId] = ["Error connecting to heap space"]
-                    }
-                    return "Entered heap space. Chat appears on RIGHT side. Type 'exit' to return to map."
-                } else {
-                    return "Already in heap space. Type 'exit' to return to map view."
-                }
-                
-            case 'map':
-                return "Map is always visible in HUD mode (right side)"
-            case 'clear':
-                return
-            case '':
-                return "Enter a command or type 'help'"
-                
-            default:
-                return "Command '${cmd}' not implemented in HUD mode yet.\nAvailable: ${getAvailableCommands()}"
+        String cmd = command.trim().toLowerCase().split(' ')[0]
+        def override = hudOverrides[cmd]
+        if (override) {
+            return override.call(command, player)
         }
+
+        // Reuse the authoritative classic dispatch (status/scan/cc/inventory/cat + entropy/recurse/
+        // symbols/shop/use/pickup/... all now work in HUD). Thread the HUD session writer through so
+        // writer-dependent handlers (e.g. cc) behave correctly.
+        return telnetServerService.dispatchCommand(command, player, hudSessionWriters[player.username])
+    }
+
+    private String hudLs(LambdaPlayer player) {
+        try { return getCompactFileList(player) }
+        catch (Exception e) { return "File listing not available: ${e.message}" }
+    }
+
+    private String hudHelp(String command) {
+        String[] parts = command.trim().toLowerCase().split(' ')
+        return parts.length > 1 ? PlayerHelp.showHelp(parts[1], 45) : PlayerHelp.showHelp(null, 45)
+    }
+
+    private String hudHeap(LambdaPlayer player) {
+        String playerId = player.username
+        if (!playersInHeapMode[playerId]) {
+            playersInHeapMode[playerId] = true
+            try {
+                chatService.enterChat(player, hudSessionWriters[playerId])
+                refreshChatHistory(playerId)
+            } catch (Exception e) {
+                heapChatHistory[playerId] = ["Error connecting to heap space"]
+            }
+            return "Entered heap space. Chat appears on RIGHT side. Type 'exit' to return to map."
+        }
+        return "Already in heap space. Type 'exit' to return to map view."
     }
     
-
-    /**
-     * Get list of available commands
-     */
-    private String getAvailableCommands() {
-        return "status, scan, cc, inventory, ls, cat, heap, repair, map, clear, help, exit"
-    }
 
     /**
      * Get compact file listing optimized for HUD mode width constraints
@@ -1019,11 +982,11 @@ class HudService {
             String repairResult = coordinateStateService.handleRepairCommand(command, player)
             
             // Check if this is an INITIATE_REPAIR command
-            if (repairResult.startsWith("INITIATE_REPAIR:")) {
-                def coords = repairResult.split(":")[1].split(",")
-                def targetX = Integer.parseInt(coords[0])
-                def targetY = Integer.parseInt(coords[1])
-                
+            def repairCoords = coordinateStateService.parseRepairInitiation(repairResult)
+            if (repairCoords) {
+                def targetX = repairCoords[0]
+                def targetY = repairCoords[1]
+
                 // For HUD mode, we'll simulate the repair mini-game by calling the service
                 // and capturing the output in repair history instead of running interactively
                 handleHudRepairMiniGame(player, targetX, targetY)

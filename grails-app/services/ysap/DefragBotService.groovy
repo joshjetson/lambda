@@ -2,24 +2,33 @@ package ysap
 
 import grails.gorm.transactions.Transactional
 import ysap.TerminalFormatter
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 
 @Transactional
 class DefragBotService {
-    
+
     def coordinateStateService
     def audioService
     def lambdaPlayerService
     def specialItemService
     def puzzleService
+    def chatService
+    def telnetServerService
+
+    // Auto-resolves an encounter if the player ignores the bot past its timeLimit.
+    // Reuses the AutoDefragService scheduler pattern; keyed by botId, cancelled on kill.
+    private final ScheduledExecutorService defragTimerScheduler = Executors.newScheduledThreadPool(1)
+    private final Map<String, ScheduledFuture> activeTimers = new ConcurrentHashMap<>()
 
     def spawnDefragBot(Integer matrixLevel, Integer sector, Integer positionX, Integer positionY) {
         // Don't spawn defrag bots in early safe zones or chat areas
         if (positionX <= 1 && positionY <= 1) {
             return null
         }
-        
-        def botId = "DF${System.currentTimeMillis().toString().takeRight(6)}"
-        def processId = (1000..9999).shuffled().first()
         
         // Calculate difficulty based on floor number (X coordinate)
         def floorNumber = positionX
@@ -30,7 +39,7 @@ class DefragBotService {
                 difficulty = 1 // Very easy on floors 0-1
                 break
             case 2:
-                difficulty = 2 // Easy on floor 2  
+                difficulty = 2 // Easy on floor 2
                 break
             case 3:
             case 4:
@@ -48,24 +57,79 @@ class DefragBotService {
                 difficulty = Math.min(10, 8 + (floorNumber - 9)) // Extreme 8-10
                 break
         }
-        
+
+        return createBot(matrixLevel, sector, positionX, positionY, difficulty, false)
+    }
+
+    // Shared bot construction (used by ordinary spawns AND the daemon — the daemon bypasses the
+    // safe-zone guard in spawnDefragBot, so it must NOT call spawnDefragBot).
+    private DefragBot createBot(Integer matrixLevel, Integer sector, Integer positionX, Integer positionY, Integer difficulty, boolean isDaemon) {
+        def prefix = isDaemon ? 'DAEMON' : 'DF'
         def bot = new DefragBot(
             matrixLevel: matrixLevel,
             sector: sector,
             positionX: positionX,
             positionY: positionY,
-            botId: botId,
+            botId: "${prefix}${System.currentTimeMillis().toString().takeRight(6)}",
             difficultyLevel: difficulty,
-            timeLimit: 60 + (difficulty * 15), // More time for harder bots
-            processId: processId,
-            lastBitDrain: new Date()
+            timeLimit: 60 + (difficulty * 15),
+            processId: (1000..9999).shuffled().first(),
+            lastBitDrain: new Date(),
+            isDaemon: isDaemon
         )
-        
         bot.flags = bot.generateRandomFlags()
         bot.fileContent = bot.generateFileContent()
         bot.save(failOnError: true)
-        
         return bot
+    }
+
+    // ===== LOGIC DAEMON ENDGAME (reuses the defrag combat chain) =====
+
+    /** Summon the Logic Daemon at the player's coordinate and wire it into the combat chain. */
+    String spawnDaemonEncounter(LambdaPlayer player, PrintWriter writer) {
+        def daemon
+        DefragBot.withTransaction {
+            daemon = createBot(player.currentMatrixLevel, 1, player.positionX, player.positionY, 10, true)
+        }
+        // Wire it exactly like a normal spawn (CoordinateStateService): session map + auto-resolve timer.
+        if (writer != null) {
+            telnetServerService.activeDefragSessions[writer] = daemon
+        }
+        startEncounterTimer(daemon, player)
+
+        def sb = new StringBuilder()
+        sb.append(TerminalFormatter.formatText("🌀 THE LOGIC DAEMON MANIFESTS 🌀", 'bold', 'magenta')).append('\r\n')
+        sb.append(TerminalFormatter.formatText("The gatekeeper ${daemon.botId} blocks your escape from Matrix Level ${player.currentMatrixLevel}.", 'italic', 'red')).append('\r\n')
+        sb.append(TerminalFormatter.formatText("Difficulty: ${daemon.difficultyLevel}/10 — defeat it with the defrag combat chain.", 'bold', 'yellow')).append('\r\n')
+        sb.append("Type 'defrag -h' to begin. Fail or ignore it and you are cast back to (0,0).\r\n")
+        return sb.toString()
+    }
+
+    /**
+     * Applied ONLY on a real kill of a daemon (the result.success branch — never the timeout path,
+     * so you cannot escape by ignoring the daemon). Advances the run: counts the kill, resets the
+     * 4 symbols (re-collect on the next level), and ascends a level (cap 10 → escaped the system).
+     */
+    def onDaemonDefeated(LambdaPlayer player) {
+        def outcome = [:]
+        LambdaPlayer.withTransaction {
+            def mp = LambdaPlayer.get(player.id)
+            mp.daemonsDefeated = (mp.daemonsDefeated ?: 0) + 1
+            mp.hasAirSymbol = false;   mp.airSymbolAcquired = null
+            mp.hasFireSymbol = false;  mp.fireSymbolAcquired = null
+            mp.hasEarthSymbol = false; mp.earthSymbolAcquired = null
+            mp.hasWaterSymbol = false; mp.waterSymbolAcquired = null
+            boolean escaped = (mp.currentMatrixLevel >= 10)
+            if (!escaped) mp.currentMatrixLevel = mp.currentMatrixLevel + 1
+            mp.save(failOnError: true)
+            outcome = [daemonsDefeated: mp.daemonsDefeated, newLevel: mp.currentMatrixLevel, escaped: escaped]
+            // mirror to the in-memory session object
+            player.daemonsDefeated = mp.daemonsDefeated
+            player.currentMatrixLevel = mp.currentMatrixLevel
+            player.hasAirSymbol = false; player.hasFireSymbol = false
+            player.hasEarthSymbol = false; player.hasWaterSymbol = false
+        }
+        return outcome
     }
     
     def getActiveBotAt(Integer matrixLevel, Integer positionX, Integer positionY) {
@@ -201,10 +265,11 @@ class DefragBotService {
             
             bot.isActive = false
             bot.save(failOnError: true)
-            
+            cancelDefragTimer(bot.botId)             // killed in time → stop the auto-resolve timer
+
             return result
         }
-        
+
         result.success = false
         result.output = "Invalid kill command. Process continues..."
         result.action = "failed"
@@ -440,12 +505,23 @@ class DefragBotService {
     }
     
     private def defragPlayer(LambdaPlayer player, DefragBot bot) {
-        // Reset player position to (0,0)
-        player.positionX = 0
-        player.positionY = 0
+        // SWAP_SPACE: absorb the defrag entirely and convert it to +50 bits.
+        if (specialItemService.hasActiveEffect(player, 'SWAP_SPACE')) {
+            specialItemService.consumeEffect(player, 'SWAP_SPACE')
+            player.bits = specialItemService.applyBitModifiers(player, 50) + (player.bits ?: 0)
+            player.hasAcquiredPid = false
+            player.save(failOnError: true)
+            return [blocked: true]
+        }
+
+        // RESPAWN_CACHE: land at the cached coordinate instead of (0,0); the loss still applies.
+        def cache = specialItemService.consumeRespawnCache(player)
+        player.positionX = (cache?.x != null) ? cache.x : 0
+        player.positionY = (cache?.y != null) ? cache.y : 0
+        if (cache?.level != null) player.currentMatrixLevel = cache.level
         player.bits = 10  // Reset to only 10 bits
         player.hasAcquiredPid = false
-        
+
         // Steal a random logic fragment (but never Basic Print)
         def fragments = player.logicFragments?.findAll { 
             it.name != 'Basic Print' 
@@ -465,22 +541,67 @@ class DefragBotService {
             player.removeFromLogicFragments(randomFragment)
             randomFragment.delete()
         }
-        
+
         player.save(failOnError: true)
+        return [blocked: false]
     }
-    
+
+    // Schedule a one-shot timer that auto-resolves this encounter if ignored past timeLimit.
+    // Cancelled on kill (cancelDefragTimer); self-guards if the player moved away or it was killed.
+    void startEncounterTimer(DefragBot bot, LambdaPlayer player) {
+        if (!bot || !player) return
+        Long botPk = bot.id
+        Long playerId = player.id
+        String botId = bot.botId
+        int seconds = (bot.timeLimit ?: 60) as int
+        ScheduledFuture future = defragTimerScheduler.schedule({
+            try {
+                expireEncounter(botPk, playerId)
+            } catch (Exception e) {
+                println "Defrag timer error for ${botId}: ${e.message}"
+            } finally {
+                activeTimers.remove(botId)
+            }
+        } as Runnable, seconds, TimeUnit.SECONDS)
+        activeTimers[botId] = future
+    }
+
+    void cancelDefragTimer(String botId) {
+        if (!botId) return
+        ScheduledFuture future = activeTimers.remove(botId)
+        future?.cancel(false)
+    }
+
+    // Fires from the scheduler thread; re-loads domains by id inside a transaction.
+    // Package-visible (not private) so integration tests can drive the expiry path deterministically.
+    void expireEncounter(Long botPk, Long playerId) {
+        LambdaPlayer.withTransaction {
+            def bot = DefragBot.get(botPk)
+            def player = LambdaPlayer.get(playerId)
+            if (!bot || !player || !bot.isActive) return            // already killed → no-op
+            // Escaped: player left the bot's coordinate before the timer fired
+            if (player.currentMatrixLevel != bot.matrixLevel ||
+                player.positionX != bot.positionX ||
+                player.positionY != bot.positionY) {
+                bot.isActive = false
+                bot.save(failOnError: true)
+                return
+            }
+            defragTimerExpired(bot, player)
+        }
+    }
+
+    // Player failed to stop the defrag in time — apply the real loss (reuses defragPlayer).
     def defragTimerExpired(DefragBot bot, LambdaPlayer player) {
-        // Player failed to stop defrag in time
-        def result = [:]
-        result.success = false
-        result.output = "Defrag process completed. System buffer cleared."
-        result.action = "timeout"
-        result.penalty = calculatePenalty(player)
-        
+        def outcome = defragPlayer(player, bot)                     // reset/steal, OR blocked by SWAP_SPACE
         bot.isActive = false
         bot.save(failOnError: true)
-        
-        return result
+        if (outcome?.blocked) {
+            chatService.sendSystemMessage("🛡️ ${player.displayName} swapped out of defrag ${bot.botId} — process neutralized.")
+            return [success: true, action: 'swapped', output: 'Swap space absorbed the defrag.']
+        }
+        chatService.sendSystemMessage("🤖 ${player.displayName} was defragged by ${bot.botId} — process timed out at (${bot.positionX},${bot.positionY}).")
+        return [success: false, action: 'timeout', output: 'Defrag process completed. System buffer cleared.']
     }
     
     private Map generateRewards(Integer difficulty, DefragBot bot) {
@@ -503,11 +624,7 @@ class DefragBotService {
         if (itemChance < (0.1 + difficulty * 0.05)) {
             rewards.specialItem = generateRandomSpecialItem()
         }
-        
-        // TEMPORARY: Force special item drop for testing
-        rewards.specialItem = generateRandomSpecialItem()
-        
-        
+
         // Rare chance for logic fragments (very rare)
         def fragmentChance = Math.random()
         if (fragmentChance < (0.02 + difficulty * 0.01)) {
@@ -532,7 +649,8 @@ class DefragBotService {
     private String generateRandomSpecialItem() {
         def items = [
             'RESPAWN_CACHE', 'SWAP_SPACE', 'BIT_MULTIPLIER', 'SCANNER_BOOST', 'STEALTH_CLOAK',
-            'DEFRAG_DETECTOR', 'LOGIC_AMPLIFIER', 'MATRIX_MAPPER', 'ENTROPY_STABILIZER', 'FRAGMENT_MAGNET'
+            'DEFRAG_DETECTOR', 'LOGIC_AMPLIFIER', 'MATRIX_MAPPER', 'ENTROPY_STABILIZER', 'FRAGMENT_MAGNET',
+            'MATRIX_CLIPPER', 'INSTANT_REPAIR_KIT'
         ]
         return items[Math.random() * items.size()]
     }
@@ -811,9 +929,21 @@ class DefragBotService {
                     response.append(TerminalFormatter.formatText("Discovered logic fragment: ${result.rewards.logicFragment}!", 'bold', 'cyan')).append('\r\n')
                 }
             }
-            
+
+            // Logic Daemon victory — only reached on a real kill (this success branch), never on timeout.
+            if (defragBot.isDaemon) {
+                def v = onDaemonDefeated(player)
+                response.append('\r\n')
+                response.append(TerminalFormatter.formatText("🌟 THE LOGIC DAEMON IS DEFEATED! 🌟", 'bold', 'green')).append('\r\n')
+                if (v.escaped) {
+                    response.append(TerminalFormatter.formatText("You breach the final gate and ESCAPE THE SYSTEM into the open net! (Daemons defeated: ${v.daemonsDefeated})", 'bold', 'yellow')).append('\r\n')
+                } else {
+                    response.append(TerminalFormatter.formatText("The gate opens — you ascend to Matrix Level ${v.newLevel}. The 4 symbols must be collected anew.", 'bold', 'cyan')).append('\r\n')
+                }
+            }
+
             return response.toString()
-            
+
         } else if (result.action == 'help') {
             // Show defrag help with file system instructions
             def helpDisplay = new StringBuilder()
