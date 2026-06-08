@@ -540,11 +540,16 @@ These are lower-fidelity by instruction. Each still obeys: no new services, map 
 > Transient turn state in-memory keyed by username. `cc` retained for teleport-class abilities.
 > **Stage 2a [DONE]:** 10-second auto-roll (per-player timer; armed when both axes spent, cancelled on
 > manual `dados`/disconnect; classic-mode animation). +AutoRollSpec → 61/61; UI-verified (idle → auto-rolls).
-> **Stage 2b [BLOCKED — needs human decision]:** the 2-minute turn timer + "someone else's turn" is NOT
-> buildable: it requires turn ROTATION (which contradicts the user's own per-player-async choice), an
-> always-on-vs-game-mode decision (no game-mode system exists), and a solo-vs-bots exception that depends
-> on the Stage 3 bot/session foundation. Escalated to the human to reconcile async-vs-sequential + the
-> game-mode model before this can be scoped. Structurally belongs with/after Stage 3.
+> **Stage 2b [DONE]:** turn-based MOVEMENT only (the human's HYBRID ruling: `dados`/`move` are turn-gated;
+> heap/chat, trading, recurse powers, defrag stay real-time while you wait). Global move-turn rotation
+> (`moveTurnOrder` CopyOnWriteArrayList + `turnIndex` in TelnetServerService); join on connect, leave on
+> disconnect (active-leaver hands off, no deadlock). Solo = rotation-of-1 = always your turn ⇒ "unlimited
+> solo time" falls out for free, no 2-min cap. Multiplayer: completing both axes (or the 2-min cap) calls
+> `advanceMoveTurn`, which arms the next holder's auto-roll + cap. +TurnRotationSpec (5) → 66/66; UI-verified
+> two-client (B refused on A's turn, B's `scan` still real-time, A rolls).
+> **Stage 2b flag (non-blocking):** rotation is GLOBAL across all online players — you wait through everyone
+> online even on other matrix levels. Level-scoped / game-session-scoped rotation is a Stage 3 enhancement
+> on this same seam (`moveTurnOrder` would key by session/level instead of global).
 > **Stage 3 [TODO]:** bot opponents + game-session/mode foundation (the "playing bots" / solo-unlimited path).
 > Stage-2 polish note: a blocked/inaccessible target currently still locks its axis.
 

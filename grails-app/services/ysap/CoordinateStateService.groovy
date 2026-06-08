@@ -480,6 +480,9 @@ class CoordinateStateService {
 
     /** `dados` — roll 2d6 (left=Y budget, right=X budget), animate ~4s, store the turn state. */
     String handleDadosCommand(LambdaPlayer player, PrintWriter writer) {
+        if (!telnetServerService.isMyMoveTurn(player.username)) {
+            return TerminalFormatter.formatText("⏳ Not your move — ${telnetServerService.currentMoveTurnHolder()} is up. You can still heap, trade, recurse, defrag, scan, repair.", 'bold', 'yellow') + "\r\n"
+        }
         cancelAutoRoll(player.username)   // they rolled themselves — no auto-roll
         def rnd = new Random()
         int yDie = 1 + rnd.nextInt(6)   // left die  → Y axis
@@ -508,6 +511,9 @@ class CoordinateStateService {
 
     /** `move <dir> <count>` — spend one axis of the current roll (forfeits the rest of that axis). */
     String handleMoveCommand(String command, LambdaPlayer player, PrintWriter writer) {
+        if (!telnetServerService.isMyMoveTurn(player.username)) {
+            return TerminalFormatter.formatText("⏳ Not your move — wait for your turn to roll.", 'bold', 'yellow') + "\r\n"
+        }
         def state = activeTurnState[player.username]
         if (!state) {
             return TerminalFormatter.formatText("Roll first — type 'dados' to roll your movement dice.", 'bold', 'yellow') + "\r\n"
@@ -542,11 +548,11 @@ class CoordinateStateService {
         int newX = Math.max(0, Math.min(9, player.positionX + delta[0] * count))
         int newY = Math.max(0, Math.min(9, player.positionY + delta[1] * count))
 
-        // Lock the axis (forfeit any remainder); clear the roll once both axes are spent.
+        // Lock the axis (forfeit any remainder); when both axes are spent the turn completes.
         if (axis == 'Y') state.yUsed = true else state.xUsed = true
         if (state.yUsed && state.xUsed) {
             activeTurnState.remove(player.username)
-            armAutoRoll(player.username, writer)   // next turn opens — 10s to dados or auto-roll
+            telnetServerService.advanceMoveTurn()   // pass the move-turn (solo: re-arms your own 10s auto-roll)
         }
 
         return moveToCoordinate(player, writer, newX, newY)
@@ -596,6 +602,46 @@ class CoordinateStateService {
 
     /** Package-visible test seam: is a 10s auto-roll currently pending for this player? */
     boolean autoRollPending(String username) { pendingAutoRolls.containsKey(username) }
+
+    // 2-minute turn cap — armed only in multiplayer (solo never times out). Sibling to pendingAutoRolls.
+    private static final int TURN_LIMIT_SECONDS = 120
+    private final Map<String, ScheduledFuture> pendingTurnTimeouts = new ConcurrentHashMap<>()
+
+    /** Arm the controls for the player whose move-turn just began: 10s auto-roll + (multiplayer) 2-min cap. */
+    void armTurnControls(String username, PrintWriter writer, boolean multiplayer) {
+        if (!username) return
+        armAutoRoll(username, writer)
+        cancelTurnTimeout(username)
+        if (multiplayer) {
+            def future = autoRollScheduler.schedule({
+                try { turnTimeoutFor(username) }
+                catch (Exception e) { println "Turn-timeout error for ${username}: ${e.message}" }
+                finally { pendingTurnTimeouts.remove(username) }
+            } as Runnable, TURN_LIMIT_SECONDS, TimeUnit.SECONDS)
+            pendingTurnTimeouts[username] = future
+        }
+    }
+
+    /** Cancel all turn controls and discard any partial roll (the player's move-turn ended). */
+    void cancelTurnControls(String username) {
+        if (!username) return
+        cancelAutoRoll(username)
+        cancelTurnTimeout(username)
+        activeTurnState.remove(username)
+    }
+
+    private void cancelTurnTimeout(String username) {
+        def f = pendingTurnTimeouts.remove(username)
+        f?.cancel(false)
+    }
+
+    /** Package-visible: the 2-min cap fired — the active player took too long, so pass the turn on. */
+    void turnTimeoutFor(String username) {
+        if (telnetServerService.currentMoveTurnHolder() != username) return   // already moved on
+        telnetServerService.advanceMoveTurn()
+    }
+
+    boolean turnTimeoutPending(String username) { pendingTurnTimeouts.containsKey(username) }
 
     /** Package-visible: fired by the timer (or a test). Rolls for the player if they still haven't. */
     void autoRollFor(String username, PrintWriter writer) {

@@ -29,6 +29,12 @@ class TelnetServerService {
     public Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters  
     private Set<PrintWriter> hudModeSessions = [] as Set // Track players in HUD mode
     public Map<PrintWriter, Socket> writerSockets = [:] // Track sockets for HUD refresh
+
+    // Phase 10 Stage 2b: global MOVE-turn rotation (only dados/move are turn-gated; everything else is
+    // real-time). Solo (size <= 1) = always your turn. Usernames in join order; turnIndex = active.
+    private final List<String> moveTurnOrder = new CopyOnWriteArrayList<>()
+    private volatile int turnIndex = 0
+
     private Map<String, Closure> commandHandlers = [
             'status': { player, command, parts, writer ->
                 lambdaPlayerService.getPlayerStatus(player)
@@ -377,6 +383,67 @@ class TelnetServerService {
         return socket?.getOutputStream()
     }
 
+    // ===== MOVE-TURN ROTATION (Phase 10 Stage 2b) — gates only dados/move =====
+
+    /** Whose move-turn it is, or '' if nobody is connected. */
+    String currentMoveTurnHolder() {
+        int size = moveTurnOrder.size()
+        return size == 0 ? '' : moveTurnOrder[turnIndex % size]
+    }
+
+    /** Solo (or empty) → always your turn; otherwise true only for the active holder. */
+    boolean isMyMoveTurn(String username) {
+        int size = moveTurnOrder.size()
+        if (size <= 1) return true
+        return moveTurnOrder[turnIndex % size] == username
+    }
+
+    int moveRotationSize() { moveTurnOrder.size() }
+
+    /** Test seam: clear the rotation (the singleton state is shared across integration specs). */
+    void resetMoveRotation() { moveTurnOrder.clear(); turnIndex = 0 }
+
+    PrintWriter writerForUsername(String username) {
+        return playerSessions.find { w, p -> p?.username == username }?.key
+    }
+
+    /** Add a player to the rotation on connect; the first player becomes the active holder. */
+    synchronized void joinMoveRotation(String username) {
+        if (!username || moveTurnOrder.contains(username)) return
+        boolean wasEmpty = moveTurnOrder.isEmpty()
+        moveTurnOrder.add(username)
+        if (wasEmpty) {
+            turnIndex = 0
+            coordinateStateService.armTurnControls(username, writerForUsername(username), moveTurnOrder.size() > 1)
+        }
+    }
+
+    /** Remove a player on disconnect; if the leaver held the turn, hand it to the next remaining player. */
+    synchronized void leaveMoveRotation(String username) {
+        if (!username) return
+        int idx = moveTurnOrder.indexOf(username)
+        if (idx < 0) return
+        boolean wasActive = (currentMoveTurnHolder() == username)
+        coordinateStateService.cancelTurnControls(username)
+        moveTurnOrder.remove(idx)
+        if (moveTurnOrder.isEmpty()) { turnIndex = 0; return }
+        if (idx < turnIndex) turnIndex--
+        turnIndex = turnIndex % moveTurnOrder.size()
+        if (wasActive) {
+            coordinateStateService.armTurnControls(currentMoveTurnHolder(), writerForUsername(currentMoveTurnHolder()), moveTurnOrder.size() > 1)
+        }
+    }
+
+    /** Pass the move-turn to the next player (called when a turn completes or its 2-min cap fires). */
+    synchronized void advanceMoveTurn() {
+        int size = moveTurnOrder.size()
+        if (size == 0) return
+        coordinateStateService.cancelTurnControls(currentMoveTurnHolder())
+        turnIndex = (turnIndex + 1) % size
+        def next = currentMoveTurnHolder()
+        coordinateStateService.armTurnControls(next, writerForUsername(next), size > 1)
+    }
+
     private synchronized void handleClient(Socket clientSocket) {
         Thread.start {
             clientCount++
@@ -413,7 +480,8 @@ class TelnetServerService {
             if (player) {
                 playerSessions[writer] = player
                 lambdaPlayerService.updatePlayerActivity(player)
-                
+                joinMoveRotation(player.username)   // enter the move-turn rotation
+
                 showPlayerDashboard(writer, player)
                 
                 // NOTE: Main game loop
@@ -524,6 +592,7 @@ class TelnetServerService {
                 }
                 playerSessions.remove(writer)
                 coordinateStateService.cancelAutoRoll(player.username)   // don't fire a timer onto a dead socket
+                leaveMoveRotation(player.username)                       // exit the rotation (hands off the turn if active)
             }
 
             // Clean up HUD mode session if active

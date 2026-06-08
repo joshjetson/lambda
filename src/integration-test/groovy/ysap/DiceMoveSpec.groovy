@@ -19,6 +19,10 @@ class DiceMoveSpec extends Specification {
 
     @Autowired CoordinateStateService coordinateStateService
     @Autowired LambdaPlayerService lambdaPlayerService
+    @Autowired TelnetServerService telnetServerService
+
+    // Empty rotation → solo → every player is always "their move turn" (the gate passes).
+    def setup() { telnetServerService.resetMoveRotation() }
 
     private LambdaPlayer playerAt00(String name) {
         def p = lambdaPlayerService.createPlayer(name.toLowerCase(), name, 'CLASSIC_LAMBDA')

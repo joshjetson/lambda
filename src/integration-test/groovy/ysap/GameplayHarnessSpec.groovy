@@ -189,10 +189,10 @@ class GameplayHarnessSpec extends Specification {
     }
 
     void "move is a wired command (Phase 10) — needs a dados roll first, not 'unknown'"() {
-        when: "no roll yet, so move guides the player to roll (proves the command is dispatched)"
+        when: "no roll yet, so move guides the player (roll first, or wait-your-turn) — proves it's dispatched"
         String out = bot.command('move north 1')
 
         then:
-        out.toLowerCase().contains('roll first')
+        out.toLowerCase() =~ /roll first|not your move/
     }
 }
