@@ -523,6 +523,7 @@ class TelnetServerService {
                     println "Error setting player offline: ${e.message}"
                 }
                 playerSessions.remove(writer)
+                coordinateStateService.cancelAutoRoll(player.username)   // don't fire a timer onto a dead socket
             }
 
             // Clean up HUD mode session if active

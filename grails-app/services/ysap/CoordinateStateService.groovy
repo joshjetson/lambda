@@ -2,6 +2,10 @@ package ysap
 
 import grails.gorm.transactions.Transactional
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @Transactional
 class CoordinateStateService {
@@ -14,6 +18,12 @@ class CoordinateStateService {
     // Phase 10: transient per-player dice/turn state (NOT persisted — per-session), keyed by username.
     // [yDie, xDie, yBudget, xBudget, yUsed, xUsed]. Present only between `dados` and spending both axes.
     private static final Map<String, Map> activeTurnState = new ConcurrentHashMap<>()
+
+    // Phase 10 Stage 2a: per-player 10s auto-roll. When a turn opens (both axes spent) the player has
+    // 10s to `dados` or it rolls for them. Mirrors the DefragBotService timer pattern; classic-mode only.
+    private static final int AUTO_ROLL_SECONDS = 10
+    private final ScheduledExecutorService autoRollScheduler = Executors.newScheduledThreadPool(1)
+    private final Map<String, ScheduledFuture> pendingAutoRolls = new ConcurrentHashMap<>()
 
     def getOrCreateCoordinateState(Integer matrixLevel, Integer x, Integer y) {
         def coordinate = CoordinateState.findByMatrixLevelAndCoordinateXAndCoordinateY(matrixLevel, x, y)
@@ -470,6 +480,7 @@ class CoordinateStateService {
 
     /** `dados` — roll 2d6 (left=Y budget, right=X budget), animate ~4s, store the turn state. */
     String handleDadosCommand(LambdaPlayer player, PrintWriter writer) {
+        cancelAutoRoll(player.username)   // they rolled themselves — no auto-roll
         def rnd = new Random()
         int yDie = 1 + rnd.nextInt(6)   // left die  → Y axis
         int xDie = 1 + rnd.nextInt(6)   // right die → X axis
@@ -535,6 +546,7 @@ class CoordinateStateService {
         if (axis == 'Y') state.yUsed = true else state.xUsed = true
         if (state.yUsed && state.xUsed) {
             activeTurnState.remove(player.username)
+            armAutoRoll(player.username, writer)   // next turn opens — 10s to dados or auto-roll
         }
 
         return moveToCoordinate(player, writer, newX, newY)
@@ -559,6 +571,52 @@ class CoordinateStateService {
 
     /** Package-visible test seam: the current dice/turn state for a username (null if not rolled). */
     Map turnStateFor(String username) { activeTurnState[username] }
+
+    /** Arm the 10s auto-roll for a player whose turn just opened (no current roll). Replaces any pending one. */
+    void armAutoRoll(String username, PrintWriter writer) {
+        if (!username) return
+        cancelAutoRoll(username)
+        def future = autoRollScheduler.schedule({
+            try {
+                autoRollFor(username, writer)
+            } catch (Exception e) {
+                println "Auto-roll error for ${username}: ${e.message}"
+            } finally {
+                pendingAutoRolls.remove(username)
+            }
+        } as Runnable, AUTO_ROLL_SECONDS, TimeUnit.SECONDS)
+        pendingAutoRolls[username] = future
+    }
+
+    void cancelAutoRoll(String username) {
+        if (!username) return
+        def f = pendingAutoRolls.remove(username)
+        f?.cancel(false)
+    }
+
+    /** Package-visible test seam: is a 10s auto-roll currently pending for this player? */
+    boolean autoRollPending(String username) { pendingAutoRolls.containsKey(username) }
+
+    /** Package-visible: fired by the timer (or a test). Rolls for the player if they still haven't. */
+    void autoRollFor(String username, PrintWriter writer) {
+        LambdaPlayer player = null
+        LambdaPlayer.withTransaction { player = LambdaPlayer.findByUsername(username) }
+        if (!player || turnStateFor(username) != null) return   // gone, or they rolled first
+
+        def out = telnetServerService.getOutputStreamForWriter(writer)
+        if (out != null) {
+            try {
+                out.write(("\r\n" + TerminalFormatter.formatText("⏱ ${AUTO_ROLL_SECONDS}s elapsed — auto-rolling...", 'bold', 'yellow') + "\r\n").getBytes("UTF-8"))
+                out.flush()
+            } catch (ignored) { }
+        }
+        // handleDadosCommand animates to the socket itself and returns the settled frame; since we're
+        // out of the command loop, push the settled frame to the socket too.
+        def result = handleDadosCommand(player, writer)
+        if (out != null) {
+            try { out.write(result.getBytes("UTF-8")); out.flush() } catch (ignored) { }
+        }
+    }
 
     // ===== REPAIR COMMAND HANDLERS (moved from TelnetServerService) =====
 

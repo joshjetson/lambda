@@ -44,10 +44,11 @@ for cmd in status:02_status scan:03_scan map:04_map inventory:05_inventory \
   send "$c"; sleep 1.5; snap "$n"
 done
 
-# --- Phase 10: dice roll (animated) + move ---
+# --- Phase 10: dice roll (animated) + move + 10s auto-roll ---
 send "dados"; sleep 2; snap "17_dados_rolling"   # mid-animation (dice cycling)
 sleep 4; snap "18_dados_settled"                 # after the ~4s animation settles
-send "move east 2"; sleep 1.5; snap "19_move"
+send "move east 1"; sleep 1; send "move north 1"; sleep 1; snap "19_move"  # spend both axes
+echo "  idling ~13s for the 10s auto-roll to fire..."; sleep 13; snap "20_autoroll"
 
 # --- HUD full-screen mode ---
 send "hud"; sleep 3; snap "09_hud_enter"

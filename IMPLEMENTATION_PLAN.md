@@ -538,8 +538,14 @@ These are lower-fidelity by instruction. Each still obeys: no new services, map 
 > Extracted shared `moveToCoordinate` so `cc` (teleport) and dice-`move` share one encounter path.
 > Revived the dead `movementRangeBonus` (Geometric Entity `recurse movement`) as a per-axis dice bonus.
 > Transient turn state in-memory keyed by username. `cc` retained for teleport-class abilities.
-> **Stage 2 [TODO]:** 10s auto-roll, 2-minute turn timer, per-player turn structure/pressure.
-> **Stage 3 [TODO]:** bot opponents (the "playing bots" / solo-unlimited-time path).
+> **Stage 2a [DONE]:** 10-second auto-roll (per-player timer; armed when both axes spent, cancelled on
+> manual `dados`/disconnect; classic-mode animation). +AutoRollSpec → 61/61; UI-verified (idle → auto-rolls).
+> **Stage 2b [BLOCKED — needs human decision]:** the 2-minute turn timer + "someone else's turn" is NOT
+> buildable: it requires turn ROTATION (which contradicts the user's own per-player-async choice), an
+> always-on-vs-game-mode decision (no game-mode system exists), and a solo-vs-bots exception that depends
+> on the Stage 3 bot/session foundation. Escalated to the human to reconcile async-vs-sequential + the
+> game-mode model before this can be scoped. Structurally belongs with/after Stage 3.
+> **Stage 3 [TODO]:** bot opponents + game-session/mode foundation (the "playing bots" / solo-unlimited path).
 > Stage-2 polish note: a blocked/inaccessible target currently still locks its axis.
 
 ### Original sketch (per-player turn phases) ----
