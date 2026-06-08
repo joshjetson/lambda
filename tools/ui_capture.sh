@@ -44,6 +44,11 @@ for cmd in status:02_status scan:03_scan map:04_map inventory:05_inventory \
   send "$c"; sleep 1.5; snap "$n"
 done
 
+# --- Phase 10: dice roll (animated) + move ---
+send "dados"; sleep 2; snap "17_dados_rolling"   # mid-animation (dice cycling)
+sleep 4; snap "18_dados_settled"                 # after the ~4s animation settles
+send "move east 2"; sleep 1.5; snap "19_move"
+
 # --- HUD full-screen mode ---
 send "hud"; sleep 3; snap "09_hud_enter"
 send "scan"; sleep 2; snap "10_hud_scan"

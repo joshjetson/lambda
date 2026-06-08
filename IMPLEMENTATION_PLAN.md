@@ -528,7 +528,21 @@ Completes STATUS.md TODO #12. This is the map-dispatch refactor called out in th
 
 These are lower-fidelity by instruction. Each still obeys: no new services, map dispatch, harness gate.
 
-## PHASE 10 — Per-player turn phases (ROLL → MOVE → ACTION → END) + real `move <dir>`
+## PHASE 10 — Dice / turn-based movement (per-player async)  🔶 STAGE 1 DONE (pre+post architect review; +DiceMoveSpec → 58/58; UI verified — dice animation + move work)
+
+> **User-specified mechanic:** `dados` rolls 2d6 (left die = Y budget, right die = X budget). `move <dir>
+> <count>` spends one axis (the moment you move an axis you forfeit its remainder); after both axes,
+> `dados` again. Per-player async (no global rotation). Solo = unlimited time.
+> **Stage 1 [DONE]:** `dados` (4s two-dice ASCII animation via raw OutputStream, settles to the dice +
+> budget) + `move <north|south|east|west> <count>` (finally implementing the long-promised `move`!).
+> Extracted shared `moveToCoordinate` so `cc` (teleport) and dice-`move` share one encounter path.
+> Revived the dead `movementRangeBonus` (Geometric Entity `recurse movement`) as a per-axis dice bonus.
+> Transient turn state in-memory keyed by username. `cc` retained for teleport-class abilities.
+> **Stage 2 [TODO]:** 10s auto-roll, 2-minute turn timer, per-player turn structure/pressure.
+> **Stage 3 [TODO]:** bot opponents (the "playing bots" / solo-unlimited-time path).
+> Stage-2 polish note: a blocked/inaccessible target currently still locks its axis.
+
+### Original sketch (per-player turn phases) ----
 
 - **Shape:** a **phase machine as a `Map<Phase, PhaseDef>`** where each `PhaseDef` holds
   `allowedHandlers` (set of command keys legal in that phase) and a `transition` closure to the next

@@ -39,6 +39,12 @@ class TelnetServerService {
             'cc': { player, command, parts, writer ->
                 coordinateStateService.handleCoordinateChange(command, player, writer)
             },
+            'dados': { player, command, parts, writer ->
+                coordinateStateService.handleDadosCommand(player, writer)
+            },
+            'move': { player, command, parts, writer ->
+                coordinateStateService.handleMoveCommand(command, player, writer)
+            },
             'scan': { player, command, parts, writer ->
                 gameSessionService.scanArea(player)
             },

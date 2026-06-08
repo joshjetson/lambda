@@ -1,6 +1,7 @@
 package ysap
 
 import grails.gorm.transactions.Transactional
+import java.util.concurrent.ConcurrentHashMap
 
 @Transactional
 class CoordinateStateService {
@@ -9,6 +10,10 @@ class CoordinateStateService {
     def defragBotService
     def telnetServerService
     def specialItemService
+
+    // Phase 10: transient per-player dice/turn state (NOT persisted — per-session), keyed by username.
+    // [yDie, xDie, yBudget, xBudget, yUsed, xUsed]. Present only between `dados` and spending both axes.
+    private static final Map<String, Map> activeTurnState = new ConcurrentHashMap<>()
 
     def getOrCreateCoordinateState(Integer matrixLevel, Integer x, Integer y) {
         def coordinate = CoordinateState.findByMatrixLevelAndCoordinateXAndCoordinateY(matrixLevel, x, y)
@@ -334,6 +339,13 @@ class CoordinateStateService {
             return "Coordinates must be within matrix bounds (0-9). Requested: (${newX},${newY})"
         }
 
+        return moveToCoordinate(player, writer, newX, newY)
+    }
+
+    // Shared move + encounter core used by both `cc` (teleport) and the dice `move` command.
+    // Validates accessibility (with MATRIX_CLIPPER bypass), plays directional audio, moves the
+    // player, refreshes session state, and rolls the floor-scaled defrag encounter.
+    private String moveToCoordinate(LambdaPlayer player, PrintWriter writer, int newX, int newY) {
         // Check if coordinate change is allowed (accessibility)
         def movementCheck = this.canPlayerMoveToCoordinate(player, newX, newY)
         if (!movementCheck.allowed) {
@@ -447,6 +459,106 @@ class CoordinateStateService {
         def moveMessage = "Lambda entity changed coordinates to (${newX},${newY})\r\n"
         return TerminalFormatter.formatText(moveMessage, 'bold', 'green')
     }
+
+    // ===== DICE / TURN MOVEMENT (Phase 10) =====
+
+    // Direction → [dx, dy] per step. Map-dispatch, no switch. north=+Y, south=-Y, east=+X, west=-X.
+    private static final Map<String, List<Integer>> MOVE_DELTA = [
+        north: [0, 1], n: [0, 1], south: [0, -1], s: [0, -1],
+        east: [1, 0], e: [1, 0], west: [-1, 0], w: [-1, 0]
+    ]
+
+    /** `dados` — roll 2d6 (left=Y budget, right=X budget), animate ~4s, store the turn state. */
+    String handleDadosCommand(LambdaPlayer player, PrintWriter writer) {
+        def rnd = new Random()
+        int yDie = 1 + rnd.nextInt(6)   // left die  → Y axis
+        int xDie = 1 + rnd.nextInt(6)   // right die → X axis
+        // movementRangeBonus (Geometric Entity `recurse movement`) adds to each axis — only while the
+        // recursion window is active (same gate as every other recursion bonus).
+        int bonus = lambdaPlayerService.recursionEffectActive(player) ? (player.movementRangeBonus ?: 0) : 0
+        int yBudget = yDie + bonus
+        int xBudget = xDie + bonus
+
+        // ~4s in-place dice animation on the real socket (no-op in HUD / when there's no socket).
+        def out = telnetServerService.getOutputStreamForWriter(writer)
+        if (out != null) {
+            animateDice(out, rnd)
+        }
+
+        activeTurnState[player.username] = [yDie: yDie, xDie: xDie, yBudget: yBudget, xBudget: xBudget, yUsed: false, xUsed: false]
+
+        def caption = "Y(left)=${yBudget}  X(right)=${xBudget}" + (bonus ? "  (+${bonus} range)" : "")
+        def sb = new StringBuilder()
+        sb.append(TerminalFormatter.formatText("⟫ DICE ROLLED ⟪", 'bold', 'yellow')).append("\r\n")
+        sb.append(DiceRenderer.pair(yDie, xDie, caption))
+        sb.append("Move with: move <north|south|east|west> <count>  —  one move per axis, then 'dados' again.\r\n")
+        return sb.toString()
+    }
+
+    /** `move <dir> <count>` — spend one axis of the current roll (forfeits the rest of that axis). */
+    String handleMoveCommand(String command, LambdaPlayer player, PrintWriter writer) {
+        def state = activeTurnState[player.username]
+        if (!state) {
+            return TerminalFormatter.formatText("Roll first — type 'dados' to roll your movement dice.", 'bold', 'yellow') + "\r\n"
+        }
+        def parts = command.trim().toLowerCase().split(/\s+/)
+        if (parts.length < 3) {
+            return TerminalFormatter.formatText("Usage: move <north|south|east|west> <count>", 'bold', 'yellow') + "\r\n"
+        }
+        def dir = parts[1]
+        def delta = MOVE_DELTA[dir]
+        if (!delta) {
+            return TerminalFormatter.formatText("Unknown direction '${dir}'. Use north/south/east/west.", 'bold', 'red') + "\r\n"
+        }
+        int count
+        try { count = Integer.parseInt(parts[2]) } catch (NumberFormatException e) {
+            return TerminalFormatter.formatText("Count must be a number.", 'bold', 'red') + "\r\n"
+        }
+
+        String axis = (delta[0] != 0) ? 'X' : 'Y'
+        boolean axisUsed = (axis == 'Y') ? state.yUsed : state.xUsed
+        if (axisUsed) {
+            return TerminalFormatter.formatText("${axis} axis already committed this roll — move the other axis or 'dados' again.", 'bold', 'yellow') + "\r\n"
+        }
+        int budget = (axis == 'Y') ? state.yBudget : state.xBudget
+        if (count < 1) {
+            return TerminalFormatter.formatText("Count must be at least 1 (your ${axis} budget is ${budget}).", 'bold', 'red') + "\r\n"
+        }
+        if (count > budget) {
+            return TerminalFormatter.formatText("Your ${axis} budget is ${budget}, you requested ${count}.", 'bold', 'red') + "\r\n"
+        }
+
+        int newX = Math.max(0, Math.min(9, player.positionX + delta[0] * count))
+        int newY = Math.max(0, Math.min(9, player.positionY + delta[1] * count))
+
+        // Lock the axis (forfeit any remainder); clear the roll once both axes are spent.
+        if (axis == 'Y') state.yUsed = true else state.xUsed = true
+        if (state.yUsed && state.xUsed) {
+            activeTurnState.remove(player.username)
+        }
+
+        return moveToCoordinate(player, writer, newX, newY)
+    }
+
+    private void animateDice(OutputStream out, Random rnd) {
+        try {
+            int lines = DiceRenderer.lineCount(true)
+            out.write("\r\n".getBytes("UTF-8"))
+            for (int f = 0; f < 22; f++) {                      // ~22 × 170ms ≈ 3.8s
+                if (f > 0) out.write("\033[${lines}A".getBytes("UTF-8"))   // up to redraw in place
+                out.write(DiceRenderer.pair(1 + rnd.nextInt(6), 1 + rnd.nextInt(6), "rolling...").getBytes("UTF-8"))
+                out.flush()
+                Thread.sleep(170)
+            }
+            out.write("\033[${lines}A\033[J".getBytes("UTF-8"))  // erase the cycling block
+            out.flush()
+        } catch (Exception ignored) {
+            // animation is cosmetic — never fail the roll on a write/interrupt error
+        }
+    }
+
+    /** Package-visible test seam: the current dice/turn state for a username (null if not rolled). */
+    Map turnStateFor(String username) { activeTurnState[username] }
 
     // ===== REPAIR COMMAND HANDLERS (moved from TelnetServerService) =====
 
