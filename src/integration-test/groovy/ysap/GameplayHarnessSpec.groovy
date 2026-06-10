@@ -1,6 +1,7 @@
 package ysap
 
 import grails.testing.mixin.integration.Integration
+import org.springframework.beans.factory.annotation.Autowired
 import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Stepwise
@@ -26,8 +27,21 @@ class GameplayHarnessSpec extends Specification {
     @Shared
     LambdaTelnetClient bot
 
+    @Autowired
+    TelnetServerService telnetServerService
+
     def cleanupSpec() {
         bot?.close()
+    }
+
+    /** Poll a condition until true or the deadline passes (for async server-side cleanup). */
+    private boolean pollUntil(long ms, Closure<Boolean> cond) {
+        long deadline = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < deadline) {
+            if (cond()) return true
+            Thread.sleep(100)
+        }
+        return cond()
     }
 
     void "a brand-new entity can be created and spawns at level 1 (0,0)"() {
@@ -194,5 +208,36 @@ class GameplayHarnessSpec extends Specification {
 
         then:
         out.toLowerCase() =~ /roll first|not your move/
+    }
+
+    // --- Connection robustness (QA-found crash family): a thrown handler must not kill the thread,
+    // and a dropped client must not leave a ghost session. The StaleStateException race that exposed
+    // this in defrag combat can't be reproduced deterministically over a socket, so we prove the
+    // invariant it violated: any throwing handler is caught and the connection survives.
+
+    void "a handler that throws is caught — the connection survives and still prompts"() {
+        when: "the diagnostic seam handler throws; processGameCommand is now guarded"
+        String boomOut = bot.command('__boom')
+
+        then: "the failure is reported to the player, not fatal"
+        boomOut.toLowerCase().contains('command failed')
+
+        and: "the very next command still works — the thread did not die"
+        bot.command('status') =~ LambdaTelnetClient.PROMPT
+    }
+
+    void "a disconnected entity is cleaned out of playerSessions (finally-cleanup, no ghost)"() {
+        given: "a second entity connects and is registered"
+        def ghost = new LambdaTelnetClient('localhost', TELNET_PORT)
+        ghost.createCharacter('ghostx', 'GhostX', 1)
+
+        expect: "it is present in the live session map"
+        pollUntil(5_000) { telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+
+        when: "it drops its connection"
+        ghost.close()
+
+        then: "cleanup runs in the finally block → the session is removed (no ghost left behind)"
+        pollUntil(5_000) { !telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
     }
 }

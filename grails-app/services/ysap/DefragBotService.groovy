@@ -142,19 +142,21 @@ class DefragBotService {
         def result = [:]
         def trimmedCommand = command.trim()
         
-        // Check if 5 seconds have passed since last bit drain
+        // Check if 5 seconds have passed since last bit drain.
+        // `bot` here is the long-lived DETACHED instance from activeDefragSessions; persisting it
+        // across transactions races the encounter-timer scheduler (which bumps the row's version in
+        // expireEncounter/kill) and throws StaleStateException. The bits are already moved inside
+        // drainPlayerBits' own transaction (re-loading the player by id), so we only need an
+        // in-memory throttle here — never re-save the detached bot. Losing one cosmetic drain tick
+        // is acceptable; a dead connection is not.
         def now = new Date()
         if (now.time - bot.lastBitDrain.time >= 5000) {
             try {
                 drainPlayerBits(player, bot)
-                bot.lastBitDrain = now
-                bot.save(failOnError: true)
             } catch (Exception e) {
-                println "Error draining bits: ${e.message}"
-                // Reset bit drain timer to avoid repeated failures
-                bot.lastBitDrain = now
-                bot.save(failOnError: true)
+                println "Error draining bits for ${bot?.botId}: ${e.message}"
             }
+            bot.lastBitDrain = now   // in-memory throttle only; do NOT persist the detached bot
         }
         
         if (trimmedCommand.equalsIgnoreCase("defrag -h") || trimmedCommand.equalsIgnoreCase("defrag --help")) {
@@ -263,8 +265,17 @@ class DefragBotService {
                 }
             }
             
-            bot.isActive = false
-            bot.save(failOnError: true)
+            // Deactivate on a freshly-loaded managed instance — never the detached session copy,
+            // whose version may be stale vs the encounter-timer thread, which would StaleState and
+            // fail the kill (the bug that left defrag combat unwinnable).
+            DefragBot.withTransaction {
+                def managedBot = DefragBot.get(bot.id)
+                if (managedBot) {
+                    managedBot.isActive = false
+                    managedBot.save(failOnError: true)
+                }
+            }
+            bot.isActive = false                     // keep the in-memory session copy consistent
             cancelDefragTimer(bot.botId)             // killed in time → stop the auto-resolve timer
 
             return result
@@ -494,10 +505,13 @@ class DefragBotService {
                 if (bitsToRemove > 0) {
                     managedPlayer.bits -= bitsToRemove
                     managedPlayer.save(failOnError: true)
-                    
+
                     // Check if player has no bits left
                     if (managedPlayer.bits <= 0) {
-                        defragPlayer(managedPlayer, bot)
+                        // Re-load the bot by id so defragPlayer's bot.save() acts on a managed, current
+                        // instance — never the detached session copy (which would StaleState).
+                        def managedBot = DefragBot.get(bot.id) ?: bot
+                        defragPlayer(managedPlayer, managedBot)
                     }
                 }
             }
@@ -864,15 +878,12 @@ class DefragBotService {
             
             if (result.rewards.specialItem) {
                 try {
-                    println "DEBUG DefragBotService: Creating special item '${result.rewards.specialItem}' for player ${player.displayName} (ID: ${player.id})"
                     def item = specialItemService.createSpecialItem(player, result.rewards.specialItem)
                     audioService.playSound("item_found")
                     if (item) {
-                        println "DEBUG DefragBotService: Item creation SUCCESS - ${item.name} (ID: ${item.id})"
                         response.append(TerminalFormatter.formatText("Found special item: ${item.name}!", 'bold', 'magenta')).append('\r\n')
                         response.append(TerminalFormatter.formatText("${item.description}", 'italic', 'white')).append('\r\n')
                     } else {
-                        println "DEBUG DefragBotService: Item creation FAILED - createSpecialItem returned null"
                         response.append(TerminalFormatter.formatText("Found special item: ${result.rewards.specialItem}!", 'bold', 'magenta')).append('\r\n')
                         response.append(TerminalFormatter.formatText("⚠️ Item creation failed - please contact admin", 'italic', 'red')).append('\r\n')
                     }

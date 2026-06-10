@@ -122,8 +122,6 @@ class SimpleRepairService {
         session.cyclingValues.remove(session.currentSlot)
         session.currentSlot++
 
-        println "DEBUG: Locked value ${valueToLock}, now at slot ${session.currentSlot}"
-
         // If complete, resolve repair
         if (session.isComplete()) {
             return completeRepair(session)
@@ -228,9 +226,7 @@ class SimpleRepairService {
 
     def isPlayerInRepairSession(String playerUsername) {
         def session = activeSessions[playerUsername]
-        def result = session && session.isActive
-        println "DEBUG: isPlayerInRepairSession(${playerUsername}) -> session=${session}, isActive=${session?.isActive}, result=${result}"
-        return result
+        return session && session.isActive
     }
     
     def stopRepairSession(String playerUsername) {

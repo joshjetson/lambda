@@ -586,8 +586,8 @@ class ChatService {
     }
 
     private PrintWriter findWriterForPlayer(LambdaPlayer target) {
-        return telnetServerService.playerSessions.find { writer, player ->
-            player.id == target.id
-        }?.key
+        // Delegate to the single live-writer-preferring resolver so pm/offer notifications never
+        // resolve to a lingering ghost session (DRY: one resolver, used by username and by id).
+        return telnetServerService.writerForPlayerId(target.id)
     }
 }

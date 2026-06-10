@@ -36,6 +36,11 @@ class TelnetServerService {
     private volatile int turnIndex = 0
 
     private Map<String, Closure> commandHandlers = [
+            // Diagnostic seam: a handler that always throws, used by the integration harness to prove
+            // a failing command is caught and the connection survives (it must NOT kill the thread).
+            '__boom': { player, command, parts, writer ->
+                throw new RuntimeException("boom-test")
+            },
             'status': { player, command, parts, writer ->
                 lambdaPlayerService.getPlayerStatus(player)
             },
@@ -404,7 +409,23 @@ class TelnetServerService {
     void resetMoveRotation() { moveTurnOrder.clear(); turnIndex = 0 }
 
     PrintWriter writerForUsername(String username) {
-        return playerSessions.find { w, p -> p?.username == username }?.key
+        return liveWriterMatching { p -> p?.username == username }
+    }
+
+    /** Resolve a session writer by player id (single source of truth — ChatService delegates here). */
+    PrintWriter writerForPlayerId(Long playerId) {
+        return liveWriterMatching { p -> p?.id == playerId }
+    }
+
+    // Resolve a session writer for a player predicate, preferring a LIVE (open) socket over any
+    // lingering ghost, and the most recently registered match (the live reconnect) over older ones.
+    // Guards targeted delivery (pm, trade offers) from being silently sent to a dead writer.
+    private PrintWriter liveWriterMatching(Closure<Boolean> pred) {
+        PrintWriter match = null
+        playerSessions.each { w, p ->
+            if (pred(p) && (match == null || !(writerSockets[w]?.isClosed()))) match = w
+        }
+        return match
     }
 
     /** Add a player to the rotation on connect; the first player becomes the active holder. */
@@ -457,6 +478,8 @@ class TelnetServerService {
 
             def reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
 
+            LambdaPlayer player = null
+            try {
             // Animate the welcome logo
             animateWelcomeLogo(clientSocket.getOutputStream())
 
@@ -476,7 +499,7 @@ class TelnetServerService {
             sendFormattedOutput(clientSocket.getOutputStream(), welcomeMessage.toString())
 
             // Handle player authentication/creation
-            LambdaPlayer player = handlePlayerLogin(writer, reader)
+            player = handlePlayerLogin(writer, reader)
             if (player) {
                 playerSessions[writer] = player
                 lambdaPlayerService.updatePlayerActivity(player)
@@ -502,7 +525,6 @@ class TelnetServerService {
                         lambdaPlayerService.saveCommandToHistory(player, line.trim())
                     }
                     // Check for repair mini-game commands
-                    println "DEBUG: Checking repair session for ${player.username}, isInSession: ${simpleRepairService.isPlayerInRepairSession(player.username)}"
                     if (simpleRepairService.isPlayerInRepairSession(player.username)) {
                             def command = line.trim()
                             def messageBuilder = new StringBuilder()
@@ -551,9 +573,19 @@ class TelnetServerService {
                                 continue
                             }
                         } else {
-                            // NOTE: This is the line that processes commands sent during normal gameplay
-                            def response = processGameCommand(line, player, writer)
-                            
+                            // NOTE: This is the line that processes commands sent during normal gameplay.
+                            // Guard it: a thrown handler must not kill the connection thread — show the
+                            // player an error and loop back to a fresh prompt instead.
+                            def response
+                            try {
+                                response = processGameCommand(line, player, writer)
+                            } catch (Exception cmdEx) {
+                                println "Command '${line}' failed for ${player?.username}: ${cmdEx.message}"
+                                sendFormattedOutput(clientSocket.getOutputStream(),
+                                    TerminalFormatter.formatText("⚠ Command failed: ${cmdEx.message}", 'bold', 'red') + "\r\n")
+                                continue
+                            }
+
                             // Check if entering HUD mode
                             if (response == "HUD_MODE_ENTER") {
                                 def enterResult = hudService.enterHudMode(clientSocket.getOutputStream(), player, clientSocket.getInputStream())
@@ -580,34 +612,37 @@ class TelnetServerService {
                     }
                 }
             }
-
-            println 'DEBUG: BEFORE TRY :#5'
-            // Cleanup
-            if (player) {
-                try {
-                    println 'DEBUG: INSIDE TRY :#6'
-                    lambdaPlayerService.setPlayerOffline(player)
-                } catch (Exception e) {
-                    println "Error setting player offline: ${e.message}"
+            } catch (Exception threadEx) {
+                // A thread-level failure (e.g. a dropped socket mid-write) must still fall through
+                // to cleanup below — never leak a ghost session.
+                println "Client thread error for ${player?.username}: ${threadEx.message}"
+            } finally {
+                // Cleanup ALWAYS runs — on normal quit, on disconnect, and on any escaped exception.
+                if (player) {
+                    try {
+                        lambdaPlayerService.setPlayerOffline(player)
+                    } catch (Exception e) {
+                        println "Error setting player offline: ${e.message}"
+                    }
+                    playerSessions.remove(writer)
+                    coordinateStateService.cancelAutoRoll(player.username)   // don't fire a timer onto a dead socket
+                    leaveMoveRotation(player.username)                       // exit the rotation (hands off the turn if active)
                 }
-                playerSessions.remove(writer)
-                coordinateStateService.cancelAutoRoll(player.username)   // don't fire a timer onto a dead socket
-                leaveMoveRotation(player.username)                       // exit the rotation (hands off the turn if active)
-            }
 
-            // Clean up HUD mode session if active
-            hudModeSessions.remove(writer)
-            writerSockets.remove(writer)  // Clean up socket mapping
+                // Clean up HUD mode session if active
+                hudModeSessions.remove(writer)
+                writerSockets.remove(writer)  // Clean up socket mapping
 
-            reader.close()
-            writer.close()
-            clientSocket.close()
-            clientWriters.remove(writer)
+                try { reader.close() } catch (ignored) {}
+                try { writer.close() } catch (ignored) {}
+                try { clientSocket.close() } catch (ignored) {}
+                clientWriters.remove(writer)
 
-            synchronized (this) {
-                clientCount--
-                println "Client disconnected. Total clients: $clientCount"
-                updateClientCount()
+                synchronized (this) {
+                    clientCount--
+                    println "Client disconnected. Total clients: $clientCount"
+                    updateClientCount()
+                }
             }
         }
     }
@@ -1350,7 +1385,6 @@ class TelnetServerService {
             outputStream.write(-1); outputStream.write(-3); outputStream.write(3)  // IAC DO SUPPRESS-GO-AHEAD
             outputStream.flush()
             
-            println "DEBUG: Character mode enabled - keystroke detection active"
             Thread.sleep(100) // Brief pause for negotiation
             
             while (true) {
@@ -1528,7 +1562,6 @@ class TelnetServerService {
         try {
             int command = input.read()
             int option = input.read()
-            println "DEBUG: Telnet negotiation - command: ${command}, option: ${option}"
             if (command == -3 && (option != 1 && option != 3)) { // DO, but not ECHO or SUPPRESS_GO_AHEAD
                 output.write(-1); output.write(-4); output.write(option) // WONT
                 output.flush()
