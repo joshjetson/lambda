@@ -346,7 +346,8 @@ class PuzzleService {
         def result = [success: false, message: '']
         
         PuzzleLogicFragment.withTransaction {
-            def fragment = PuzzleLogicFragment.findByName(fragmentName)
+            // Copy from the canonical TEMPLATE (owner == null), never another player's owned copy.
+            def fragment = PuzzleLogicFragment.findByNameAndOwnerIsNull(fragmentName)
             if (!fragment) {
                 result.message = "Puzzle fragment '${fragmentName}' not found."
                 return result

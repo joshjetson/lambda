@@ -19,7 +19,10 @@ class PuzzleLogicFragment {
     ]
     
     static constraints = {
-        name blank: false, maxSize: 100, unique: true
+        // Unique per owner, not globally: the seeded TEMPLATE (owner == null) and each player's
+        // awarded COPY can share a name. A plain `unique: true` made awardPuzzleFragment's copy
+        // collide with the template.
+        name blank: false, maxSize: 100, unique: 'owner'
         description blank: false, maxSize: 500
         fragmentType inList: ['CALCULATOR', 'DECODER', 'LOCATOR', 'VALIDATOR']
         powerLevel min: 1, max: 10

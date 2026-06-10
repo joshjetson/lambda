@@ -188,6 +188,7 @@ class PuzzleRandomizationService {
                 variableName: variableName,
                 variableValue: variableValue,
                 variableType: variableType,
+                elementType: elementType,   // required (inList AIR/FIRE/EARTH/WATER); was omitted → init failed
                 description: generateVariableDescription(elementType, variableName),
                 matrixLevel: mapNumber,
                 mapNumber: mapNumber,

@@ -114,9 +114,19 @@ Designed under the lambda-architect (APPROVE), implemented, and verified both by
 - **Tests:** full integration suite **68/68 green** (added 2 robustness steps: throwing-handler
   survival + disconnect-no-ghost).
 
+### Puzzle-fragment reward path — FIXED (follow-up resolved)
+- Root cause 1: `PuzzleRandomizationService.generateRandomizedVariables` omitted the required
+  `elementType` on `HiddenVariable`, so `initializePuzzleSystem` threw — and because the 4-fragment
+  seed shares that one `@Transactional` boundary, the seed **rolled back too**, so the reward later
+  failed with "not found". Fixed by setting `elementType`. Boot now seeds all 10 maps cleanly.
+- Root cause 2 (exposed by the regression test once seeding persisted): `PuzzleLogicFragment.name`
+  was globally `unique: true`, but `awardPuzzleFragment` creates a player-owned **copy** with the
+  same name → unique violation. Fixed: `name unique: 'owner'` (template owner==null + per-player
+  copies coexist) and award now copies from the template via `findByNameAndOwnerIsNull`.
+- Verified: full suite **69/69**; new `PuzzleNonceSpec` step proves the seed persists and the award
+  succeeds. This also unblocks the broader puzzle/`execute`/`unlock_symbol` content (now seeded).
+
 ### Remaining (NOT addressed — follow-ups)
-- Boot-time **puzzle init failure** `HiddenVariable.elementType cannot be null` → breaks the
-  puzzle-fragment kill reward (live: "Puzzle fragment found… not found").
 - `playerSessions` is an unsynchronized `LinkedHashMap` read by the resolver while mutated by client
   threads — make it concurrent or lock the touch points (architect note, non-fatal).
 - Merchant-unreachable (above) + the minor display bugs (literal `\n`, `mingle` alias, scan dup,

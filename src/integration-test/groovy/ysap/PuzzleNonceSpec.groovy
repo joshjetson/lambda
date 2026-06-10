@@ -16,6 +16,7 @@ class PuzzleNonceSpec extends Specification {
 
     @Autowired CompetitivePuzzleService competitivePuzzleService
     @Autowired LambdaPlayerService lambdaPlayerService
+    @Autowired PuzzleService puzzleService
 
     void "solving a puzzle room records the element's nonce as discovered"() {
         given: "a player whose WATER puzzle room is calculated, with the session nonce + room seeded"
@@ -47,5 +48,28 @@ class PuzzleNonceSpec extends Specification {
             assert p.discoveredNonces?.any { it.nonceName == 'WATER_KEY_1' && it.isDiscovered }
             true
         }
+    }
+
+    // Regression: a missing `elementType` on HiddenVariable made initializePuzzleSystem throw, and
+    // because the 4-fragment seed shares that one transaction, the seed rolled back too — so the
+    // defrag puzzle-fragment reward later failed with "not found". With elementType set, the whole
+    // init commits and the boot-seeded templates persist and can be awarded.
+    void "boot-seeded puzzle logic fragments persist and can be awarded (puzzle-init fix)"() {
+        given: "the defrag reward pool names"
+        def names = ['Atmospheric Processor', 'Thermal Signature Decoder',
+                     'Geological Survey Tool', 'Hydro-Chemical Validator']
+
+        expect: "the boot seeding committed (would be null/rolled-back before the fix)"
+        names.every { String n -> LambdaPlayer.withTransaction { PuzzleLogicFragment.findByName(n) != null } }
+
+        when: "a defrag-kill-style puzzle fragment reward is awarded"
+        def player = LambdaPlayer.withTransaction {
+            def p = lambdaPlayerService.createPlayer('pzreward', 'PzReward', 'CLASSIC_LAMBDA')
+            LambdaPlayer.get(p.id)
+        }
+        def result = puzzleService.awardPuzzleFragment(player, 'Atmospheric Processor')
+
+        then: "it is granted (previously failed with 'not found')"
+        result.success
     }
 }
