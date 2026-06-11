@@ -94,6 +94,27 @@ class ClusterRoleService {
 
     // --- team verbs (PIECE 9: lock / spam) -------------------------------------------------------
 
+    String invokeForCluster(LambdaPlayer player) { invokeForClusterBy(player.username) }
+
+    /**
+     * Cluster `invoke` — the climactic win gate. ONLY the true Lambda holding all 4 symbols wins;
+     * the decoy is refused even with all 4 (it knows — this never reveals identity to an enemy).
+     * Returns null outside an active match so the Node daemon path handles it.
+     */
+    String invokeForClusterBy(String username) {
+        def me = clusterMatchService.clusterStateFor(username)
+        if (!me || me.state != 'ACTIVE') return null
+        if (me.role != 'CLASSIC_LAMBDA') return warn("Only a Lambda can invoke the Logic Daemon.")
+        if (!me.isTrueLambda) {
+            return TerminalFormatter.formatText("🌀 The symbols do not answer — you are the DECOY. Only the true Lambda can harness them.", 'bold', 'yellow') + "\r\n"
+        }
+        def held = clusterMatchService.heldSymbolsOf(username)
+        def missing = ClusterMatchService.SYMBOLS.findAll { !held.contains(it) }
+        if (missing) return warn("You need all 4 symbols to invoke — missing: ${missing.join(', ')} (${held.size()}/4).")
+        def team = clusterMatchService.declareWin(username)
+        return TerminalFormatter.formatText("🏆 LOGIC DAEMON DEFEATED — TEAM ${team} WINS! The true Lambda harnessed all 4 symbols and escaped the system.", 'bold', 'green') + "\r\n"
+    }
+
     String lockTarget(LambdaPlayer caster, String targetName) { lockTargetFor(caster.username, targetName) }
     String spamTarget(LambdaPlayer caster, String targetName) { spamTargetFor(caster.username, targetName) }
     String deployBot(LambdaPlayer caster, Integer x, Integer y) { deployBotFor(caster.username, x, y) }

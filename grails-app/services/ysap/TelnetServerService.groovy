@@ -122,7 +122,8 @@ class TelnetServerService {
                 elementalSymbolService.handleUnlockSymbolCommand(command, player)
             },
             'invoke': { player, command, parts, writer ->
-                elementalSymbolService.handleInvokeDaemonCommand(player, writer)
+                // In a cluster match, invoke is the true-Lambda win gate; otherwise the Node daemon.
+                clusterRoleService.invokeForCluster(player) ?: elementalSymbolService.handleInvokeDaemonCommand(player, writer)
             },
             'collect_var': { player, command, parts, writer ->
                 if (parts.length > 1) {

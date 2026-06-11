@@ -504,4 +504,27 @@ class GameplayHarnessSpec extends Specification {
         clusterRoleService.transferFor('botuser', 'fire', clusterMatchService.anEnemyMemberUsername('botuser')).toLowerCase().contains('teammate')
         clusterRoleService.transferFor(alphaBinary, 'fire', alphaCircuit).toLowerCase().contains('lambda')
     }
+
+    // --- Cluster Mode PIECE 11: the win gate — invoke only for the TRUE Lambda with all 4 symbols.
+    // (Last cluster step: a win ends the match.)
+
+    void "invoke wins only for the true Lambda holding all 4 symbols; the decoy is refused"() {
+        given: "identify ALPHA's true Lambda and decoy, and give each all 4 symbols"
+        def lambdas = clusterMatchService.lambdaUsernamesOnTeamOf('botuser')
+        def trueL = lambdas.find { clusterMatchService.clusterStateFor(it).isTrueLambda }
+        def decoy = lambdas.find { !clusterMatchService.clusterStateFor(it).isTrueLambda }
+        ClusterMatchService.SYMBOLS.each { clusterMatchService.grantSymbol(decoy, it); clusterMatchService.grantSymbol(trueL, it) }
+
+        expect: "the DECOY with all 4 symbols is refused (match stays ACTIVE)"
+        clusterRoleService.invokeForClusterBy(decoy).toLowerCase().contains('decoy')
+        clusterMatchService.clusterStateFor(trueL) != null
+
+        when: "the TRUE Lambda invokes with all 4"
+        String win = clusterRoleService.invokeForClusterBy(trueL)
+
+        then: "the team wins and the match ends"
+        win.toLowerCase() =~ /wins|defeated|escaped/
+        clusterMatchService.winnerForUser(trueL) in ['ALPHA', 'BETA']
+        clusterMatchService.clusterStateFor(trueL) == null   // ENDED → no longer an active membership
+    }
 }

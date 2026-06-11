@@ -52,6 +52,26 @@ class ClusterMatchService {
 
     static final List<String> SYMBOLS = ['AIR', 'FIRE', 'EARTH', 'WATER'].asImmutable()
 
+    /** End the match with the given player's team as the winner. Returns the winning team name. */
+    String declareWin(String username) {
+        String team = null
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (m) { team = m.team.name; m.team.match.state = 'ENDED'; m.team.match.winner = team; m.team.match.save(failOnError: true) }
+        }
+        return team
+    }
+
+    /** The winner of the player's match (works after ENDED, unlike the active-only seams). */
+    String winnerForUser(String username) {
+        String w = null
+        ClusterMatch.withTransaction {
+            def mem = ClusterMembership.findAllByUsername(username)?.find { true }
+            w = mem?.team?.match?.winner
+        }
+        return w
+    }
+
     /** Elemental symbols an entity is currently carrying (held on the membership). */
     Set<String> heldSymbolsOf(String username) {
         Set<String> out = [] as Set
