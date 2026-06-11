@@ -505,6 +505,32 @@ class GameplayHarnessSpec extends Specification {
         clusterRoleService.transferFor(alphaBinary, 'fire', alphaCircuit).toLowerCase().contains('lambda')
     }
 
+    // --- Cluster Mode PIECE 12: the deduction-loop capstone (the design's read-test).
+
+    void "CAPSTONE: the hunter reads escort geometry pointing at the real Lambda, yet identity stays hidden"() {
+        given: "ALPHA's true Lambda is escorted on (2,2); the decoy stands alone on (9,9)"
+        def lambdas = clusterMatchService.lambdaUsernamesOnTeamOf('botuser')
+        def trueL = lambdas.find { clusterMatchService.clusterStateFor(it).isTrueLambda }
+        def decoy = lambdas.find { !clusterMatchService.clusterStateFor(it).isTrueLambda }
+        clusterMatchService.setMemberPosition(trueL, 2, 2)
+        clusterMatchService.setMemberPosition(decoy, 9, 9)
+        ['CIRCUIT_PATTERN', 'FLOWING_CURRENT', 'BINARY_FORM'].each {
+            clusterMatchService.setMemberPosition(clusterMatchService.memberWithRole('botuser', it, true), 2, 2)
+        }
+        def betaCircuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', false)
+
+        when: "the enemy Circuit sweeps ALPHA (clear any prior-test cooldown first)"
+        clusterRoleService.clearScanCooldowns()
+        String sweep = clusterRoleService.scanAllFor(betaCircuit)
+
+        then: "the geometry HINTS — the Λ on (2,2) is escorted, the Λ on (9,9) is alone"
+        sweep =~ /\(2,2\): [1-9]/
+        sweep.contains('(9,9): 0')
+
+        and: "yet the firewall keeps the two Lambdas INDISTINGUISHABLE by identity (location ≠ identity)"
+        clusterRoleService.firewallViewOf(betaCircuit, trueL) == clusterRoleService.firewallViewOf(betaCircuit, decoy)
+    }
+
     // --- Cluster Mode PIECE 11: the win gate — invoke only for the TRUE Lambda with all 4 symbols.
     // (Last cluster step: a win ends the match.)
 

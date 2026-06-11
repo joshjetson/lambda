@@ -33,6 +33,9 @@ class ClusterRoleService {
     def telnetServerService
     def defragBotService
 
+    /** Test seam: clear scan cooldowns so a Circuit can sweep immediately. */
+    void clearScanCooldowns() { lastScanAt.clear() }
+
     /**
      * `scan all` — the Circuit (Tracker) team ability: enemy positions + role-class, Ghosts excluded,
      * Lambdas shown generically (the true/decoy bit never reaches the facts), on a cooldown. Returns
