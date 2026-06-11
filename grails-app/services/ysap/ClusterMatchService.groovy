@@ -1,6 +1,7 @@
 package ysap
 
 import ysap.helpers.BoxBuilder
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Cluster Mode referee — match/lobby lifecycle, team membership, and role + true/decoy assignment.
@@ -32,6 +33,33 @@ class ClusterMatchService {
 
     /** Single source of the role-name mapping (used by the panel renderer AND the firewall). */
     static String roleLabel(String role) { ROLE_LABEL[role] ?: role }
+
+    // In-memory immobilize state (Current's `lock`). Keyed by username → lock expiry millis.
+    private final Map<String, Long> lockUntil = new ConcurrentHashMap<>()
+
+    void applyLock(String username, long durationMs) { lockUntil[username] = System.currentTimeMillis() + durationMs }
+    void clearLock(String username) { lockUntil.remove(username) }
+    boolean isLocked(String username) {
+        Long until = lockUntil[username]
+        if (until == null) return false
+        if (System.currentTimeMillis() >= until) { lockUntil.remove(username); return false }
+        return true
+    }
+    int lockRemainingSeconds(String username) {
+        Long until = lockUntil[username]
+        return until == null ? 0 : Math.max(0, ((until - System.currentTimeMillis()) / 1000) as int)
+    }
+
+    /** Resolve a typed target name to an actual member username in the caster's match (case-insensitive). */
+    String resolveTargetUsername(String casterUsername, String targetName) {
+        String out = null
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(casterUsername)
+            def hit = m?.team?.match?.teams?.collectMany { it.members }?.find { it.username.equalsIgnoreCase(targetName) }
+            out = hit?.username
+        }
+        return out
+    }
 
     /** True when the player is in an ACTIVE cluster match (drives real-time movement + position sync). */
     boolean isInActiveMatch(String username) {

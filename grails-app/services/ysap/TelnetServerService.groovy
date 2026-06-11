@@ -82,6 +82,12 @@ class TelnetServerService {
             'cluster': { player, command, parts, writer ->
                 clusterMatchService.handleClusterCommand(command, player, writer)
             },
+            'lock': { player, command, parts, writer ->
+                clusterRoleService.lockTarget(player, parts.length > 1 ? parts[1] : '') ?: TerminalFormatter.formatText("'lock' is a Cluster Mode (Current) ability.", 'italic', 'cyan') + "\r\n"
+            },
+            'spam': { player, command, parts, writer ->
+                clusterRoleService.spamTarget(player, parts.length > 1 ? parts[1] : '') ?: TerminalFormatter.formatText("'spam' is a Cluster Mode (Ghost) ability.", 'italic', 'cyan') + "\r\n"
+            },
             'defrag': { player, command, parts, writer ->
                 def result = defragBotService.handleDefragCommandFromTelnet(command, player, writer)
                 // Also need to track the encounter in the activeDefragSessions

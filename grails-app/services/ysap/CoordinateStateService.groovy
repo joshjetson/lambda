@@ -368,6 +368,11 @@ class CoordinateStateService {
             }
         }
 
+        // Current's `lock` immobilizes the target for 60s (no-op for anyone not locked).
+        if (clusterMatchService.isLocked(player.username)) {
+            return TerminalFormatter.formatText("⚡ You are electric-locked — ${clusterMatchService.lockRemainingSeconds(player.username)}s remaining.", 'bold', 'red')
+        }
+
         // Cluster occupancy: in an active match, enforce 4/coord & 2/team (Geo 5th-slot exception).
         // No-op for Node players (occupancyCheck returns allowed when not in an active cluster).
         def occ = clusterMatchService.occupancyCheck(player.username, newX, newY)

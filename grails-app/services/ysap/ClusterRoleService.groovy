@@ -15,9 +15,20 @@ import java.util.concurrent.ConcurrentHashMap
 class ClusterRoleService {
 
     static final long SCAN_COOLDOWN_MS = 8000
+    static final long LOCK_MS = 60000
     private final Map<String, Long> lastScanAt = new ConcurrentHashMap<>()
 
+    // Each role's signature active team verb (Geo's ability is passive: trap-immunity + squeeze).
+    static final Map<String, String> ROLE_VERBS = [
+        'CIRCUIT_PATTERN': 'scan all',
+        'FLOWING_CURRENT': 'lock',
+        'DIGITAL_GHOST'  : 'spam',
+        'BINARY_FORM'    : 'deploy',
+        'CLASSIC_LAMBDA' : 'transfer',
+    ].asImmutable()
+
     def clusterMatchService
+    def telnetServerService
 
     /**
      * `scan all` — the Circuit (Tracker) team ability: enemy positions + role-class, Ghosts excluded,
@@ -77,6 +88,61 @@ class ClusterRoleService {
             box.addLine("   Λ#${i + 1} @ (${L.x},${L.y}): ${near} nearby ally(ies)")
         }
     }
+
+    // --- team verbs (PIECE 9: lock / spam) -------------------------------------------------------
+
+    String lockTarget(LambdaPlayer caster, String targetName) { lockTargetFor(caster.username, targetName) }
+    String spamTarget(LambdaPlayer caster, String targetName) { spamTargetFor(caster.username, targetName) }
+
+    /** Current's `lock`: immobilize an adjacent target for 60s. Returns null outside an active match. */
+    String lockTargetFor(String casterUsername, String targetName) {
+        def gate = verbGate(casterUsername, 'FLOWING_CURRENT', "'lock' is the Current (Disruptor) team ability.", targetName)
+        if (gate.fail) return gate.msg
+        String target = gate.target
+        clusterMatchService.applyLock(target, LOCK_MS)
+        pushTo(target, TerminalFormatter.formatText("\r\n⚡ ELECTRIC-LOCKED — you cannot move for 60s.", 'bold', 'red'))
+        return TerminalFormatter.formatText("⚡ Locked ${target} for 60 seconds.", 'bold', 'green') + "\r\n"
+    }
+
+    /** Ghost's `spam`: flood an adjacent target's terminal with junk. Returns null outside a match. */
+    String spamTargetFor(String casterUsername, String targetName) {
+        def gate = verbGate(casterUsername, 'DIGITAL_GHOST', "'spam' is the Ghost (Saboteur) team ability.", targetName)
+        if (gate.fail) return gate.msg
+        String target = gate.target
+        def junk = new StringBuilder("\r\n")
+        20.times { junk.append(TerminalFormatter.formatText("0xDEADBEEF ▓░▒ stack overflow ${System.nanoTime() % 99999}", 'bold', 'magenta')).append("\r\n") }
+        pushTo(target, junk.toString())
+        return TerminalFormatter.formatText("👻 Flooded ${target}'s terminal.", 'bold', 'green') + "\r\n"
+    }
+
+    // Shared verb gate: in an ACTIVE match, caster has the right role, target resolves (case-insensitive),
+    // isn't self, and is on an adjacent coordinate. Returns [fail, msg, target].
+    private Map verbGate(String casterUsername, String requiredRole, String wrongRoleMsg, String targetName) {
+        def me = clusterMatchService.clusterStateFor(casterUsername)
+        if (!me || me.state != 'ACTIVE') return [fail: true, msg: null]   // not a cluster verb → caller handles
+        if (me.role != requiredRole) return [fail: true, msg: warn(wrongRoleMsg)]
+        if (!targetName) return [fail: true, msg: warn("Name a target.")]
+        def target = clusterMatchService.resolveTargetUsername(casterUsername, targetName)
+        if (!target) return [fail: true, msg: warn("No entity named '${targetName}' in this match.")]
+        if (target.equalsIgnoreCase(casterUsername)) return [fail: true, msg: warn("You cannot target yourself.")]
+        if (!adjacent(casterUsername, target)) return [fail: true, msg: warn("${target} is not on an adjacent coordinate.")]
+        return [fail: false, msg: null, target: target]
+    }
+
+    private boolean adjacent(String a, String b) {
+        def pa = clusterMatchService.memberPositionOf(a); def pb = clusterMatchService.memberPositionOf(b)
+        if (pa?.x == null || pa?.y == null || pb?.x == null || pb?.y == null) return false
+        return Math.max(Math.abs((pa.x - pb.x) as int), Math.abs((pa.y - pb.y) as int)) <= 1
+    }
+
+    private void pushTo(String username, String text) {
+        try {
+            def w = telnetServerService.writerForUsername(username)
+            if (w) { w.print(text); w.flush() }
+        } catch (Exception ignored) { /* target offline / bot → no-op */ }
+    }
+
+    private String warn(String msg) { TerminalFormatter.formatText(msg, 'bold', 'yellow') + "\r\n" }
 
     /**
      * What `viewerUsername` is allowed to see about `targetUsername`. Role-class is always visible

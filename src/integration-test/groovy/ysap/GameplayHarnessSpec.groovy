@@ -446,4 +446,35 @@ class GameplayHarnessSpec extends Specification {
         then: "the membership position now mirrors the board move — scan-all/occupancy see real data"
         pos == [x: 3, y: 4]
     }
+
+    // --- Cluster Mode PIECE 9: team verbs lock (Current) + spam (Ghost).
+
+    void "Current locks an adjacent enemy; Ghost spams; both are role-gated and adjacency-gated"() {
+        given: "an ALPHA Current and Ghost stacked on (5,5), an enemy adjacent at (5,6)"
+        def alphaCurrent = clusterMatchService.memberWithRole('botuser', 'FLOWING_CURRENT', true)
+        def alphaGhost = clusterMatchService.memberWithRole('botuser', 'DIGITAL_GHOST', true)
+        def enemy = clusterMatchService.memberWithRole('botuser', 'BINARY_FORM', false)
+        clusterMatchService.setMemberPosition(alphaCurrent, 5, 5)
+        clusterMatchService.setMemberPosition(alphaGhost, 5, 5)
+        clusterMatchService.setMemberPosition(enemy, 5, 6)
+
+        expect: "a non-Current is refused the lock ability"
+        clusterRoleService.lockTargetFor(lambdas0(), enemy).toLowerCase().contains('current')
+
+        when: "the Current locks the adjacent enemy"
+        String lockOut = clusterRoleService.lockTargetFor(alphaCurrent, enemy)
+
+        then: "the enemy is immobilized"
+        lockOut.toLowerCase().contains('locked')
+        clusterMatchService.isLocked(enemy)
+
+        and: "a non-adjacent target is refused"
+        clusterMatchService.setMemberPosition(enemy, 0, 0)
+        clusterRoleService.lockTargetFor(alphaCurrent, enemy).toLowerCase().contains('adjacent')
+
+        and: "the Ghost floods an adjacent enemy; a non-Ghost is refused spam"
+        clusterMatchService.setMemberPosition(enemy, 5, 6)
+        clusterRoleService.spamTargetFor(alphaGhost, enemy).toLowerCase().contains('flooded')
+        clusterRoleService.spamTargetFor(lambdas0(), enemy).toLowerCase().contains('ghost')
+    }
 }
