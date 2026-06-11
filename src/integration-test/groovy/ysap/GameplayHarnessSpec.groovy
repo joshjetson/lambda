@@ -33,6 +33,9 @@ class GameplayHarnessSpec extends Specification {
     @Autowired
     ClusterMatchService clusterMatchService
 
+    @Autowired
+    ClusterRoleService clusterRoleService
+
     def cleanupSpec() {
         bot?.close()
     }
@@ -313,5 +316,24 @@ class GameplayHarnessSpec extends Specification {
         s.trueLambdasPerTeam['ALPHA'] == 1
         s.trueLambdasPerTeam['BETA'] == 1
         s.bots > 0
+    }
+
+    // --- Cluster Mode PIECE 3: enemy-view identity firewall.
+
+    void "the firewall hides the true Lambda from enemies but reveals it to teammates"() {
+        given: "the ACTIVE match has both teams holding two Lambdas (from cluster start)"
+        def lambdas = clusterMatchService.lambdaUsernamesOnTeamOf('botuser')   // ALPHA's two Lambdas
+        def enemy = clusterMatchService.anEnemyMemberUsername('botuser')        // a BETA member
+
+        expect:
+        lambdas.size() == 2
+        enemy != null
+
+        and: "an ENEMY's view of the two Lambdas is identical — no true/decoy leak"
+        clusterRoleService.firewallViewOf(enemy, lambdas[0]) == clusterRoleService.firewallViewOf(enemy, lambdas[1])
+        clusterRoleService.firewallViewOf(enemy, lambdas[0]).lambda == 'HIDDEN'
+
+        and: "a TEAMMATE distinguishes them — one TRUE, one DECOY"
+        clusterRoleService.firewallViewOf('botuser', lambdas[0]) != clusterRoleService.firewallViewOf('botuser', lambdas[1])
     }
 }

@@ -30,6 +30,9 @@ class ClusterMatchService {
         'BINARY_FORM'    : 'Binary (Trapper)'
     ].asImmutable()
 
+    /** Single source of the role-name mapping (used by the panel renderer AND the firewall). */
+    static String roleLabel(String role) { ROLE_LABEL[role] ?: role }
+
     // O(1) sub-command dispatch — no switch/if-ladder (Doctrine #2).
     private final Map<String, Closure> clusterSubcommands = [
         'create': { LambdaPlayer p -> createMatch(p) },
@@ -175,7 +178,7 @@ class ClusterMatchService {
             .addSeparator()
             .addLine("  Match: ${match.matchId}    State: ${match.state}")
             .addLine("  Team:  ${team.name}")
-            .addLine("  Role:  ${ROLE_LABEL[m.role] ?: m.role}")
+            .addLine("  Role:  ${roleLabel(m.role)}")
 
         if (m.role == 'CLASSIC_LAMBDA') {
             def lambdas = team.members.findAll { it.role == 'CLASSIC_LAMBDA' }
@@ -190,7 +193,7 @@ class ClusterMatchService {
 
         box.addEmptyLine().addLine("  Team roster:")
         team.members.sort { it.username }.each { mem ->
-            box.addLine("   - ${mem.username}  -  ${ROLE_LABEL[mem.role] ?: mem.role}")
+            box.addLine("   - ${mem.username}  -  ${roleLabel(mem.role)}")
         }
         return box.build() + "\r\n"
     }
@@ -247,5 +250,26 @@ class ClusterMatchService {
             if (m) n = (m.team.members.count { it.isTrueLambda }) as int
         }
         return n
+    }
+
+    /** A member username on the OPPOSING team (firewall enemy-view tests), or null. */
+    String anEnemyMemberUsername(String username) {
+        String out = null
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            def enemyTeam = m?.team?.match?.teams?.find { it.id != m.team.id }
+            out = enemyTeam?.members?.collect { it.username }?.sort()?.find { true }
+        }
+        return out
+    }
+
+    /** The Lambda usernames on the player's team (the true + decoy), for firewall tests. */
+    List<String> lambdaUsernamesOnTeamOf(String username) {
+        List<String> out = []
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (m) out = m.team.members.findAll { it.role == 'CLASSIC_LAMBDA' }.collect { it.username }.sort()
+        }
+        return out
     }
 }
