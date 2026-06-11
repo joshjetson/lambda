@@ -23,6 +23,7 @@ class TelnetServerService {
     def simpleRepairService
     def hudService
     def clusterMatchService
+    def clusterRoleService
     private ServerSocket serverSocket
     private int clientCount = 0
     private List<PrintWriter> clientWriters = new CopyOnWriteArrayList<>() // Thread-safe list
@@ -58,10 +59,13 @@ class TelnetServerService {
                 coordinateStateService.handleMoveCommand(command, player, writer)
             },
             'scan': { player, command, parts, writer ->
-                gameSessionService.scanArea(player)
+                // `scan all` is the Circuit team ability inside a cluster match; otherwise normal scan.
+                def clusterScan = (parts.length > 1 && parts[1] == 'all') ? clusterRoleService.scanAll(player) : null
+                clusterScan ?: gameSessionService.scanArea(player)
             },
             'sc': { player, command, parts, writer ->
-                gameSessionService.scanArea(player)
+                def clusterScan = (parts.length > 1 && parts[1] == 'all') ? clusterRoleService.scanAll(player) : null
+                return clusterScan ?: gameSessionService.scanArea(player)
             },
             'inventory': { player, command, parts, writer ->
                 lambdaPlayerService.showInventory(player)

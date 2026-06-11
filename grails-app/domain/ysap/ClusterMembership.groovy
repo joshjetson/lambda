@@ -12,12 +12,16 @@ class ClusterMembership {
     String role                 // = the player's avatarSilhouette (the 6 ethnicities = the 6 roles)
     Boolean isTrueLambda = false
     Boolean isBot = false
+    Integer positionX           // board position within the match (synced from LambdaPlayer / set by bot AI)
+    Integer positionY
 
     static belongsTo = [team: ClusterTeam]
 
     static constraints = {
         username blank: false, maxSize: 50
         role blank: false, maxSize: 30
+        positionX nullable: true, min: 0, max: 9
+        positionY nullable: true, min: 0, max: 9
     }
 
     String toString() { "${username} (${role}${isTrueLambda ? ', TRUE Λ' : ''})" }

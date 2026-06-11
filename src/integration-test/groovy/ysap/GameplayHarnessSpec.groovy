@@ -336,4 +336,36 @@ class GameplayHarnessSpec extends Specification {
         and: "a TEAMMATE distinguishes them — one TRUE, one DECOY"
         clusterRoleService.firewallViewOf('botuser', lambdas[0]) != clusterRoleService.firewallViewOf('botuser', lambdas[1])
     }
+
+    // --- Cluster Mode PIECE 4: scan all (Circuit tracker) — location-only intel.
+
+    void "scan all is Circuit-only, shows enemy positions, hides Ghosts, never leaks Lambda identity"() {
+        given: "a Circuit on ALPHA, plus a positioned enemy Lambda and enemy Ghost on BETA"
+        def circuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', true)
+        def enemyLambda = clusterMatchService.memberWithRole('botuser', 'CLASSIC_LAMBDA', false)
+        def enemyGhost = clusterMatchService.memberWithRole('botuser', 'DIGITAL_GHOST', false)
+        clusterMatchService.setMemberPosition(enemyLambda, 5, 5)
+        clusterMatchService.setMemberPosition(enemyGhost, 3, 3)
+
+        expect:
+        circuit && enemyLambda && enemyGhost
+
+        when: "the Circuit sweeps"
+        String out = clusterRoleService.scanAllFor(circuit)
+
+        then: "the enemy Lambda's position shows, generically; the Ghost is excluded"
+        out.contains('(5,5)')
+        out.toLowerCase().contains('lambda')
+        !out.toLowerCase().contains('true lambda')
+        !out.toLowerCase().contains('decoy')
+        !out.contains('(3,3)')                                   // ghost invisible to the array
+
+        and: "a non-Circuit (a Lambda) is refused the ability"
+        clusterRoleService.scanAllFor(lambdas0()).toLowerCase().contains('circuit')
+
+        and: "an immediate second sweep is on cooldown"
+        clusterRoleService.scanAllFor(circuit).toLowerCase().contains('recharging')
+    }
+
+    private String lambdas0() { clusterMatchService.lambdaUsernamesOnTeamOf('botuser')[0] }
 }

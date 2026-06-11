@@ -252,6 +252,40 @@ class ClusterMatchService {
         return n
     }
 
+    /**
+     * Raw enemy roster facts (role + position) for the viewer's opponents. Deliberately omits the
+     * true/decoy bit so it cannot leak through tracking; the firewall rules (ghost-exclusion, no bit)
+     * are applied by ClusterRoleService, which owns the firewall.
+     */
+    List<Map> enemyRosterFacts(String username) {
+        List<Map> out = []
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            def enemy = m?.team?.match?.teams?.find { it.id != m.team.id }
+            enemy?.members?.sort { it.username }?.each { out << [role: it.role, x: it.positionX, y: it.positionY] }
+        }
+        return out
+    }
+
+    /** A member username with `role` on the player's team (sameTeam=true) or the enemy team. Seam. */
+    String memberWithRole(String username, String role, boolean sameTeam) {
+        String out = null
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            def team = !m ? null : (sameTeam ? m.team : m.team.match.teams.find { it.id != m.team.id })
+            out = team?.members?.sort { it.username }?.find { it.role == role }?.username
+        }
+        return out
+    }
+
+    /** Set a member's board position (sync seam — used by tests now, by movement sync in PIECE 8). */
+    void setMemberPosition(String username, Integer x, Integer y) {
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (m) { m.positionX = x; m.positionY = y; m.save(failOnError: true) }
+        }
+    }
+
     /** A member username on the OPPOSING team (firewall enemy-view tests), or null. */
     String anEnemyMemberUsername(String username) {
         String out = null
