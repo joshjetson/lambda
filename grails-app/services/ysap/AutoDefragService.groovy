@@ -7,10 +7,11 @@ import java.util.concurrent.TimeUnit
 
 @Transactional
 class AutoDefragService {
-    
+
     def coordinateStateService
     def chatService
-    
+    def lambdaMerchantService
+
     private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1)
     private volatile boolean isRunning = false
     private volatile int destructionCycle = 0
@@ -76,7 +77,8 @@ class AutoDefragService {
         }
     }
     
-    private int destroyRandomCoordinates() {
+    // Package-visible (not private) so integration tests can drive the wipe cycle deterministically.
+    int destroyRandomCoordinates() {
         def destroyed = 0
         def random = new Random()
         
@@ -96,6 +98,12 @@ class AutoDefragService {
             // Wrap database operations in transaction for background thread
             CoordinateState.withTransaction {
                 try {
+                    // Never wipe the per-level merchant's tile: a wiped coord renders as X (hiding the
+                    // merchant) and can't be entered, which would make the only merchant unreachable.
+                    if (lambdaMerchantService.getMerchantAt(matrixLevel, x, y)) {
+                        return
+                    }
+
                     // Check if coordinate is already wiped
                     def currentHealth = coordinateStateService.getCoordinateHealth(matrixLevel, x, y)
                     if (currentHealth.health <= 0) {
