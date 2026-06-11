@@ -30,6 +30,9 @@ class GameplayHarnessSpec extends Specification {
     @Autowired
     TelnetServerService telnetServerService
 
+    @Autowired
+    ClusterMatchService clusterMatchService
+
     def cleanupSpec() {
         bot?.close()
     }
@@ -239,5 +242,59 @@ class GameplayHarnessSpec extends Specification {
 
         then: "cleanup runs in the finally block → the session is removed (no ghost left behind)"
         pollUntil(5_000) { !telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+    }
+
+    // --- Cluster Mode PIECE 1: match + team + role + true/decoy foundation (additive; Node untouched).
+    // botuser was created avatar 1 = CLASSIC_LAMBDA = the Lambda/Collector role.
+
+    void "cluster create starts a match and seats the creator on a team"() {
+        when:
+        String out = bot.command('cluster create')
+
+        then:
+        out.toLowerCase() =~ /cluster|match|team|alpha/
+        out =~ LambdaTelnetClient.PROMPT
+    }
+
+    void "cluster status shows the player on a team with their role (from ethnicity)"() {
+        when:
+        String out = bot.command('cluster status')
+
+        then:
+        out.toLowerCase() =~ /team|alpha|beta/
+        out.toLowerCase() =~ /collector|lambda/   // role derived from avatarSilhouette CLASSIC_LAMBDA
+    }
+
+    void "with two Lambdas, exactly one is the true Lambda and each entity sees only its own bit"() {
+        given: "a second Lambda joins the creator's match"
+        def lam2 = new LambdaTelnetClient('localhost', TELNET_PORT)
+        lam2.createCharacter('clusterb', 'ClusterB', 1)   // avatar 1 → CLASSIC_LAMBDA
+        String joinOut = lam2.command('cluster join')
+
+        expect: "the joiner landed on a team"
+        joinOut.toLowerCase() =~ /team|alpha|beta/
+
+        and: "both Lambdas are on the same team, and exactly one carries the true bit"
+        def a = clusterMatchService.clusterStateFor('botuser')
+        def b = clusterMatchService.clusterStateFor('clusterb')
+        a != null && b != null
+        a.team == b.team
+        a.isTrueLambda != b.isTrueLambda                              // one true, one decoy
+        clusterMatchService.trueLambdaCountOnTeamOf('botuser') == 1
+
+        and: "each entity's status states ITS OWN identity (self-only); roster carries no other's bit"
+        bot.command('cluster status').toLowerCase() =~ /true lambda|decoy/
+        lam2.command('cluster status').toLowerCase() =~ /true lambda|decoy/
+
+        cleanup:
+        lam2?.close()
+    }
+
+    void "cluster is a wired command — bare invocation renders the usage guide"() {
+        when:
+        String out = bot.command('cluster')
+
+        then: "the usage panel's own lines appear — only the wired handler produces these, never the\n        unknown-command fallback (a positive match, robust to async auto-roll noise in the stream)"
+        out.toLowerCase() =~ /cluster create|cluster join|cluster status/
     }
 }

@@ -22,6 +22,7 @@ class TelnetServerService {
     def gameSessionService
     def simpleRepairService
     def hudService
+    def clusterMatchService
     private ServerSocket serverSocket
     private int clientCount = 0
     private List<PrintWriter> clientWriters = new CopyOnWriteArrayList<>() // Thread-safe list
@@ -73,6 +74,9 @@ class TelnetServerService {
             },
             'mingle': { player, command, parts, writer ->   // documented alias for entering the heap
                 chatService.enterChat(player, writer)
+            },
+            'cluster': { player, command, parts, writer ->
+                clusterMatchService.handleClusterCommand(command, player, writer)
             },
             'defrag': { player, command, parts, writer ->
                 def result = defragBotService.handleDefragCommandFromTelnet(command, player, writer)
