@@ -109,16 +109,16 @@ on changing working movement code.
 |---|---|---|
 | **1 ✅** | **Match + team + role + true/decoy foundation** (domains + `ClusterMatchService.createMatch/join/assignRoles`, `cluster` command) | **DONE** — create/join/status/leave work; exactly one of two Lambdas is flagged true, visible to self only; harness 24/24; live-verified; architect APPROVE. Watch-items deferred: assignment *timing* → PIECE 2, true-Lambda-leaves orphan → PIECE 11. |
 | 2 ✅ | Lobby fill with bots + match start gate | Empty seats auto-fill so a solo human starts a 7v7; match transitions lobby→active when both teams full. |
-| 3 | Enemy-view identity firewall (`ClusterRoleService.renderForViewer`) | An enemy scanning either Lambda gets byte-identical readout (same `Λ`, role-class, name-class); a teammate sees the true-Lambda marker; no channel leaks the bit to an enemy. |
-| 4 | `scan all` (Circuit/Tracker) — location-only intel | Circuit gets enemy *positions + role-class*, Ghosts excluded, with cooldown; output never contains identity, only locations → the deduction sensor exists. |
-| 5 | Relative-correlation read (leak signal #1, geometry) | The pooled read shows "enemy bodies within N of Λ#1 vs Λ#2" — a correlation, not an answer — built from positions + occupancy. |
-| 6 | Occupancy rules (4/coord, 2/team, Geo 5th-slot) enforced on entry | Movement into a full/over-team coordinate is refused with the right reason; Geo bypasses the 4-cap; formations become legible (feeds signal #1). |
-| 7 | Item-flow as leak signal #2 (verify, light-touch) | Public heap trade/pay broadcast already surfaces goods/bits flow; confirm it renders in a cluster match and the "economic decoy tax" is playable (no new economy — reuse `ChatService`). |
-| 8 | **Movement-model decision: dice-as-real-time-budget** (decouple from global rotation) | Each player spends a per-player dice *budget* in real time; one player's combat no longer freezes others (kills PLAYTEST bug #1) — Cluster never uses the global lap. |
-| 9 | Team verbs: `lock` (Current), `spam` (Ghost) | Adjacent CC/disruption works against a *suspected* Lambda; pinning the **decoy** wastes it (the bluff has teeth). |
-| 10 | Team verbs: `deploy bot` (Binary), `transfer` (Lambda→carrier) | Area denial + symbol hand-off (football) work; carrier is theft-vulnerable; reuses existing bot spawn + symbol fields. |
-| 11 | Win gate: `invoke` succeeds **only** for the true Lambda holding 4 symbols | Decoy with all 4 symbols is refused at `invoke`; true Lambda with 4 wins → the climactic reveal/interception window is real. |
-| 12 | Wizard-of-Oz read-test harness step (from CLUSTER_DESIGN §b) | Hand-driven 2Λ+escorts+flow formation lets a scripted hunter deduce the real Λ — proves the *whole deduction loop* is well-formed before bot AI. |
+| 3 ✅ | Enemy-view identity firewall (`ClusterRoleService.renderForViewer`) | An enemy scanning either Lambda gets byte-identical readout (same `Λ`, role-class, name-class); a teammate sees the true-Lambda marker; no channel leaks the bit to an enemy. |
+| 4 ✅ | `scan all` (Circuit/Tracker) — location-only intel | Circuit gets enemy *positions + role-class*, Ghosts excluded, with cooldown; output never contains identity, only locations → the deduction sensor exists. |
+| 5 ✅ | Relative-correlation read (leak signal #1, geometry) | The pooled read shows "enemy bodies within N of Λ#1 vs Λ#2" — a correlation, not an answer — built from positions + occupancy. |
+| 6 ✅ | Occupancy rules (4/coord, 2/team, Geo 5th-slot) enforced on entry | Movement into a full/over-team coordinate is refused with the right reason; Geo bypasses the 4-cap; formations become legible (feeds signal #1). |
+| 7 ✅ | Item-flow as leak signal #2 (verify, light-touch) | Public heap trade/pay broadcast already surfaces goods/bits flow; confirm it renders in a cluster match and the "economic decoy tax" is playable (no new economy — reuse `ChatService`). |
+| 8 ✅ | **Movement-model decision: dice-as-real-time-budget** (decouple from global rotation) | Each player spends a per-player dice *budget* in real time; one player's combat no longer freezes others (kills PLAYTEST bug #1) — Cluster never uses the global lap. |
+| 9 ✅ | Team verbs: `lock` (Current), `spam` (Ghost) | Adjacent CC/disruption works against a *suspected* Lambda; pinning the **decoy** wastes it (the bluff has teeth). |
+| 10 ✅ | Team verbs: `deploy bot` (Binary), `transfer` (Lambda→carrier) | Area denial + symbol hand-off (football) work; carrier is theft-vulnerable; reuses existing bot spawn + symbol fields. |
+| 11 ✅ | Win gate: `invoke` succeeds **only** for the true Lambda holding 4 symbols | Decoy with all 4 symbols is refused at `invoke`; true Lambda with 4 wins → the climactic reveal/interception window is real. |
+| 12 ✅ | Wizard-of-Oz read-test harness step (from CLUSTER_DESIGN §b) | Hand-driven 2Λ+escorts+flow formation lets a scripted hunter deduce the real Λ — proves the *whole deduction loop* is well-formed before bot AI. |
 
 > Bot AI tiers (CLUSTER_DESIGN open item) are **out of MVP scope** here — pieces 1–12 use
 > seat-fill stubs (piece 2) good enough for geometry; the hard "bot fakes/reads a decoy" AI is a
