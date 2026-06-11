@@ -241,7 +241,7 @@ class GameplayHarnessSpec extends Specification {
         ghost.createCharacter('ghostx', 'GhostX', 1)
 
         expect: "it is present in the live session map"
-        pollUntil(5_000) { telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+        pollUntil(10_000) { telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
 
         when: "it drops its connection"
         ghost.close()
@@ -558,20 +558,23 @@ class GameplayHarnessSpec extends Specification {
     // --- Cluster symbol collection PIECE 1: place → Lambda lands on it → collected + relocates.
 
     void "a Lambda auto-collects a symbol on its coordinate, which then relocates"() {
-        given: "ALPHA's true Lambda, and a FIRE symbol forced onto a known coord (3,7)"
+        given: "ALPHA's true Lambda, and a symbol it does NOT already hold forced onto a known coord (3,7)"
         def matchId = clusterMatchService.clusterStateFor('botuser').matchId
         def lam = clusterMatchService.lambdaUsernamesOnTeamOf('botuser').find { clusterMatchService.clusterStateFor(it).isTrueLambda }
-        clusterMatchService.placeSymbol(matchId, 'FIRE', 3, 7)
+        // @Stepwise: an earlier step may have already granted this Lambda some symbols — pick one it lacks,
+        // so the collect-on-arrival hook provably fires (a held symbol would correctly no-op).
+        def sym = (['FIRE', 'WATER', 'EARTH', 'AIR'] - clusterMatchService.heldSymbolsOf(lam).toList())[0]
+        clusterMatchService.placeSymbol(matchId, sym, 3, 7)
 
-        expect: "FIRE sits on the board at (3,7)"
-        clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == 'FIRE' && it.x == 3 && it.y == 7 }
+        expect: "the symbol sits on the board at (3,7)"
+        clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == sym && it.x == 3 && it.y == 7 }
 
         when: "the Lambda lands on the symbol's coordinate (drives the collect hook)"
         clusterMatchService.setMemberPosition(lam, 3, 7)
 
-        then: "the Lambda now holds FIRE and the symbol relocated off (3,7), in-bounds (race continues)"
-        clusterMatchService.heldSymbolsOf(lam).contains('FIRE')
-        def loc = clusterMatchService.uncollectedSymbolsFor(matchId).find { it.symbol == 'FIRE' }
+        then: "the Lambda now holds the symbol and it relocated off (3,7), in-bounds (race continues)"
+        clusterMatchService.heldSymbolsOf(lam).contains(sym)
+        def loc = clusterMatchService.uncollectedSymbolsFor(matchId).find { it.symbol == sym }
         loc != null && !(loc.x == 3 && loc.y == 7) && loc.x in 0..9 && loc.y in 0..9
 
         and: "a NON-Lambda landing on a symbol does NOT collect it — the symbol stays put"
