@@ -36,6 +36,9 @@ class GameplayHarnessSpec extends Specification {
     @Autowired
     ClusterRoleService clusterRoleService
 
+    @Autowired
+    ClusterBotService clusterBotService
+
     def cleanupSpec() {
         bot?.close()
     }
@@ -504,6 +507,50 @@ class GameplayHarnessSpec extends Specification {
         clusterRoleService.transferFor('botuser', 'fire', clusterMatchService.anEnemyMemberUsername('botuser')).toLowerCase().contains('teammate')
         clusterRoleService.transferFor(alphaBinary, 'fire', alphaCircuit).toLowerCase().contains('lambda')
     }
+
+    // --- Cluster bots PIECE 1: spawn positions + deterministic escort-movement tick.
+
+    void "cluster bots receive in-bounds spawn positions"() {
+        given:
+        def matchId = clusterMatchService.clusterStateFor('botuser').matchId
+        clusterBotService.assignSpawnPositions(matchId)
+
+        expect:
+        def bots = clusterMatchService.botFactsForMatch(matchId).findAll { it.isBot }
+        bots.size() > 0
+        bots.every { it.x != null && it.y != null && it.x in 0..9 && it.y in 0..9 }
+    }
+
+    void "advanceBots walks an escort one step toward its Lambda each tick (deterministic, in-bounds)"() {
+        given: "ALPHA's Lambdas pinned on (5,5), an ALPHA escort parked at (0,0)"
+        def matchId = clusterMatchService.clusterStateFor('botuser').matchId
+        def aL = clusterMatchService.lambdaUsernamesOnTeamOf('botuser')
+        clusterMatchService.setMemberPosition(aL[0], 5, 5)
+        clusterMatchService.setMemberPosition(aL[1], 5, 5)
+        def escort = clusterMatchService.memberWithRole('botuser', 'BINARY_FORM', true)
+        clusterMatchService.setMemberPosition(escort, 0, 0)
+
+        when: "one tick"
+        clusterBotService.advanceBots(matchId)
+        def p1 = clusterMatchService.memberPositionOf(escort)
+
+        then: "moved exactly one Chebyshev step closer, in-bounds"
+        cheb(p1, 5, 5) == 4
+        p1.x in 0..9 && p1.y in 0..9
+
+        when: "nine more ticks"
+        9.times { clusterBotService.advanceBots(matchId) }
+        def pf = clusterMatchService.memberPositionOf(escort)
+
+        then: "the escort reaches and holds on its Lambda, never leaving bounds"
+        cheb(pf, 5, 5) == 0
+        pf.x in 0..9 && pf.y in 0..9
+
+        and: "advanceBots is a no-op for a non-existent / inactive match"
+        clusterBotService.advanceBots('CM_nope') == null
+    }
+
+    private int cheb(Map p, int tx, int ty) { Math.max(Math.abs((p.x as int) - tx), Math.abs((p.y as int) - ty)) }
 
     // --- Cluster Mode PIECE 12: the deduction-loop capstone (the design's read-test).
 

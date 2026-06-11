@@ -406,6 +406,28 @@ class ClusterMatchService {
         return out
     }
 
+    /** All member facts for a match (pure query for the bot AI tick — no behavior). */
+    List<Map> botFactsForMatch(String matchId) {
+        List<Map> out = []
+        ClusterMatch.withTransaction {
+            def match = ClusterMatch.findByMatchId(matchId)
+            match?.teams?.each { t ->
+                t.members.each { m ->
+                    out << [team: t.name, username: m.username, role: m.role,
+                            x: m.positionX, y: m.positionY, isBot: m.isBot]
+                }
+            }
+        }
+        return out
+    }
+
+    /** Match ids currently ACTIVE (the bot scheduler iterates these). */
+    List<String> activeMatchIds() {
+        List<String> out = []
+        ClusterMatch.withTransaction { out = ClusterMatch.findAllByState('ACTIVE').collect { it.matchId } }
+        return out
+    }
+
     /** A member's current board position as [x, y] (null entries if unset). */
     Map memberPositionOf(String username) {
         Map out = null
