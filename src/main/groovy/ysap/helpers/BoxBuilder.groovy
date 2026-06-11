@@ -29,10 +29,20 @@ class BoxBuilder {
         return this
     }
 
+    // Strip ANSI SGR escapes (ESC [ ... m) so width math counts VISIBLE characters, not color codes.
+    private static String stripAnsi(String s) {
+        return s == null ? '' : s.replaceAll(/\x1b\[[0-9;]*m/, '')
+    }
+
+    // Visible width of a line (ignoring ANSI color codes).
+    private static int visibleLength(String s) {
+        return stripAnsi(s).length()
+    }
+
     // Add a centered line
     BoxBuilder addCenteredLine(String text) {
-        def padding = width - text.length()
-        def leftPad = padding / 2
+        def padding = Math.max(0, width - visibleLength(text))
+        def leftPad = (padding / 2) as int
         def rightPad = padding - leftPad
         lines.add("${' ' * leftPad}${text}${' ' * rightPad}")
         return this
@@ -40,11 +50,8 @@ class BoxBuilder {
 
     // Add a left-aligned line
     BoxBuilder addLine(String text) {
-        def paddedText = text.padRight(width)
-        if (paddedText.length() > width) {
-            paddedText = paddedText.substring(0, width)
-        }
-        lines.add(paddedText)
+        def visible = visibleLength(text)
+        lines.add(visible < width ? text + (' ' * (width - visible)) : text)
         return this
     }
 
@@ -67,16 +74,13 @@ class BoxBuilder {
         // Top border
         result.append(TOP_LEFT).append(HORIZONTAL * width).append(TOP_RIGHT).append("\r\n")
 
-        // Content lines
+        // Content lines — pad to the box's VISIBLE width (color codes do not occupy columns).
         lines.each { line ->
             if (line == "SEPARATOR") {
                 result.append(CROSS_LEFT).append(HORIZONTAL * width).append(CROSS_RIGHT).append("\r\n")
             } else {
-                // Ensure line fits within box
-                def paddedLine = line.padRight(width)
-                if (paddedLine.length() > width) {
-                    paddedLine = paddedLine.substring(0, width)
-                }
+                def visible = visibleLength(line)
+                def paddedLine = visible < width ? line + (' ' * (width - visible)) : line
                 result.append(VERTICAL).append(paddedLine).append(VERTICAL).append("\r\n")
             }
         }

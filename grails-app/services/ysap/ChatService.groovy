@@ -230,20 +230,18 @@ class ChatService {
     }
 
     private String handleExitHeap(String command, LambdaPlayer player, PrintWriter writer) {
-        def output = new StringBuilder()
         lambdaPlayerService.setMingleStatus(player, false)
         tradeTargets.remove(player.username); pendingOffers.remove(player.username)   // clear any trade context
 
-        output.append("${player.displayName} popped from heap\r\n")
-        this.sendSystemMessage(output.toString())
-
+        // Announce the departure to everyone still in the heap: persist for history + live broadcast
+        // as one complete "[HH:mm] [SYSTEM] <name> popped from heap" line (no dangling empty header).
+        def departure = "${player.displayName} popped from heap"
+        this.sendSystemMessage(departure)
         def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
-        output.append("[${timeStr}] ${TerminalFormatter.formatText('[SYSTEM]', 'bold', 'red')}")
-        this.broadcastToChatUsers(output.toString())
-        output.append("\r\n")
-        output.append(TerminalFormatter.formatText("Null pointer new memory address. Returned to working ram", 'bold', 'green'))
-        output.append("\r\n")
-        return output.toString()
+        this.broadcastToChatUsers("[${timeStr}] ${TerminalFormatter.formatText('[SYSTEM]', 'bold', 'red')} ${departure}\r\n")
+
+        // Flavor line shown only to the leaving entity.
+        return TerminalFormatter.formatText("Null pointer new memory address. Returned to working ram", 'bold', 'green') + "\r\n"
     }
 
     private String handleEchoHeap(String trimmedCommand, LambdaPlayer player, PrintWriter writer) {
@@ -346,9 +344,9 @@ class ChatService {
         // Notify both parties
         def timeStr = new java.text.SimpleDateFormat('HH:mm').format(new Date())
         def systemMsg = "${TerminalFormatter.formatText('[PAYMENT]', 'bold', 'green')} ${player.displayName} sent ${bitsAmount} bits to ${targetName}"
-        this.broadcastToChatUsers("[${timeStr}] ${systemMsg}")
+        this.broadcastToChatUsers("[${timeStr}] ${systemMsg}\r\n")
 
-        return TerminalFormatter.formatText("Sent ${bitsAmount} bits to ${targetName}", 'bold', 'green')
+        return TerminalFormatter.formatText("Sent ${bitsAmount} bits to ${targetName}", 'bold', 'green') + "\r\n"
     }
 
     private String handlePrivateMessageCommand(String command, LambdaPlayer player, PrintWriter writer) {
