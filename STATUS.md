@@ -3,7 +3,35 @@
 > **This file is the source of truth for what actually works.** It was produced by a
 > code-level audit (not by trusting comments or older docs). `CLAUDE.md` and `README.md`
 > contain aspirational/marketing claims that are frequently ahead of the code — when they
-> disagree with this file, **this file wins**. Last verified: 2026-06-07.
+> disagree with this file, **this file wins**. Original audit: 2026-06-07.
+
+---
+
+## ⚡ MAJOR UPDATE (2026-06-10) — much of the matrix below is now OUT OF DATE
+
+A large amount was built/fixed since the original audit. Corrections to the matrix below:
+- **`move <dir> <count>` + `dados` dice movement EXISTS** (Phase 10) — the matrix's "does not exist /
+  no turn-or-dice system" rows are stale. Roll `dados` → per-axis move budget; 10s auto-roll
+  (multiplayer-only); turn rotation for Node multiplayer.
+- **`recurse <ability>` is a real charge/cooldown economy** (not UI-only). The 4 elemental symbols are
+  collectible and the **Logic Daemon endgame is winnable** (`invoke` with all 4).
+- **Crash family fixed**: the telnet thread no longer dies on a handler exception (guarded dispatch +
+  `finally` cleanup); ghost sessions gone; defrag StaleStateException race fixed; pm/trade delivery
+  reaches the live recipient.
+- **Defrag combat works end-to-end** incl. the kill+reward and the auto-resolve timer.
+
+### Cluster Mode — 7v7 hidden true/decoy Lambda (NEW, working)
+A complete, winnable team mode. `cluster create` / `join` / `start` (bot-fills to a real 7v7) /
+`status` / `leave`. Each of the 6 ethnicities is a Cluster role with a team verb:
+`scan all` (Circuit tracker — location, never identity), `lock` (Current), `spam` (Ghost),
+`deploy bot` (Binary), `transfer` (Lambda football). The two Lambdas are byte-identical to enemies
+(firewall); only behavior (escort geometry + public heap item-flow) leaks the true one. Movement is
+dice-paced (no `cc` teleport in a match); the 4 symbols are seeded on the board and a Lambda collects
+on arrival (scan reveals the field); only the **true Lambda** with all 4 can `invoke` to win.
+**Bots** move/escort/hunt/collect on a 7s tick and can win — a solo human (always the true Lambda for
+agency) faces a real, losable race. Owns: `ClusterMatchService`, `ClusterRoleService`,
+`ClusterBotService`, domains `ClusterMatch/Team/Membership`. Design: `CLUSTER_DESIGN.md`;
+build log: `CLUSTER_PLAN.md`. Verified by ~25 `GameplayHarnessSpec` steps + live play to a win.
 
 ---
 
