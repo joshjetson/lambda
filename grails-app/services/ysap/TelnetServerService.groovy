@@ -89,6 +89,9 @@ class TelnetServerService {
             'spam': { player, command, parts, writer ->
                 clusterRoleService.spamTarget(player, parts.length > 1 ? parts[1] : '') ?: TerminalFormatter.formatText("'spam' is a Cluster Mode (Ghost) ability.", 'italic', 'cyan') + "\r\n"
             },
+            'siphon': { player, command, parts, writer ->
+                clusterRoleService.siphonFrom(player, parts.length > 1 ? parts[1] : '') ?: TerminalFormatter.formatText("'siphon <target>' is a Cluster Mode (Ghost) ability.", 'italic', 'cyan') + "\r\n"
+            },
             'deploy': { player, command, parts, writer ->
                 def nums = parts.findAll { it.isInteger() }.collect { it as Integer }
                 clusterRoleService.deployBot(player, nums.size() > 0 ? nums[0] : null, nums.size() > 1 ? nums[1] : null) ?: TerminalFormatter.formatText("'deploy bot <x> <y>' is a Cluster Mode (Binary) ability.", 'italic', 'cyan') + "\r\n"

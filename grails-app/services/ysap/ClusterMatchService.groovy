@@ -180,6 +180,28 @@ class ClusterMatchService {
         return res
     }
 
+    /**
+     * Pull ONE held symbol off a CLASSIC_LAMBDA victim and scatter it back to the board (denial).
+     * Returns the stolen symbol name, or null if the victim isn't a symbol-holding Lambda.
+     * IDENTITY-BLIND: never reads isTrueLambda — siphoning the decoy succeeds exactly like the true
+     * Lambda, so the outcome can't leak which is which (the firewall holds). The symbol stays keyed in
+     * matchSymbols throughout, so relocateSymbol always re-spawns it → every match stays completable.
+     */
+    String siphonSymbolFrom(String victimUsername) {
+        String stolen = null
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(victimUsername)
+            if (!m || m.role != 'CLASSIC_LAMBDA' || m.team.match.state != 'ACTIVE') return
+            def held = parseSymbols(m.heldSymbols)
+            if (!held) return
+            def sym = held.sort().first()                     // deterministic: first alphabetical
+            held.remove(sym); m.heldSymbols = held.join(','); m.save(failOnError: true)
+            relocateSymbol(m.team.match.matchId, sym)         // back on the board to re-race
+            stolen = sym
+        }
+        return stolen
+    }
+
     private static Set<String> parseSymbols(String csv) {
         return (csv ? csv.split(',').findAll { it } : []) as Set
     }

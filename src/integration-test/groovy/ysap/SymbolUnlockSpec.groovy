@@ -57,9 +57,10 @@ class SymbolUnlockSpec extends Specification {
     }
 
     void "unlocking where no symbol of that type sits reports no resonance"() {
-        given: "player on an empty coordinate (no symbol placed here)"
+        given: "player on a guaranteed-empty coordinate — clear any boot-seeded symbol that randomly landed here"
         def p = playerAt('SymEmpty', 1, 6, 6)
         giveNonce(p, 'WATER', '--h2o')
+        ElementalSymbol.findAllByMatrixLevelAndPositionXAndPositionY(1, 6, 6).each { it.delete(failOnError: true) }
 
         expect:
         elementalSymbolService.handleUnlockSymbolCommand('unlock_symbol water --h2o', p).toLowerCase().contains('resonance')

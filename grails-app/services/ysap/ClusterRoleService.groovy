@@ -17,8 +17,10 @@ class ClusterRoleService {
     static final long SCAN_COOLDOWN_MS = 8000
     static final long LOCK_MS = 60000
     static final long DEPLOY_COOLDOWN_MS = 5000
+    static final long SIPHON_COOLDOWN_MS = 30000   // siphon denies progress → rarer than spam/deploy
     private final Map<String, Long> lastScanAt = new ConcurrentHashMap<>()
     private final Map<String, Long> lastDeployAt = new ConcurrentHashMap<>()
+    private final Map<String, Long> lastSiphonAt = new ConcurrentHashMap<>()
 
     // Each role's signature active team verb (Geo's ability is passive: trap-immunity + squeeze).
     static final Map<String, String> ROLE_VERBS = [
@@ -122,6 +124,17 @@ class ClusterRoleService {
     String spamTarget(LambdaPlayer caster, String targetName) { spamTargetFor(caster.username, targetName) }
     String deployBot(LambdaPlayer caster, Integer x, Integer y) { deployBotFor(caster.username, x, y) }
     String transferSymbol(LambdaPlayer caster, String symbol, String targetName) { transferFor(caster.username, symbol, targetName) }
+    String siphonFrom(LambdaPlayer caster, String targetName) { siphonFromFor(caster.username, targetName) }
+
+    /** Test seam: clear siphon cooldowns so a Ghost can siphon immediately. */
+    void clearSiphonCooldowns() { lastSiphonAt.clear() }
+
+    /** Shared cooldown gate so the human verb AND bot Saboteurs draw from one source (no chain-drain). */
+    boolean siphonReady(String casterUsername) {
+        Long last = lastSiphonAt[casterUsername]
+        return last == null || (System.currentTimeMillis() - last) >= SIPHON_COOLDOWN_MS
+    }
+    void markSiphon(String casterUsername) { lastSiphonAt[casterUsername] = System.currentTimeMillis() }
 
     /** Binary's `deploy bot <x> <y>`: drop a defrag bot to block/guard a coordinate. Cooldown-gated. */
     String deployBotFor(String casterUsername, Integer x, Integer y) {
@@ -174,6 +187,27 @@ class ClusterRoleService {
         20.times { junk.append(TerminalFormatter.formatText("0xDEADBEEF ▓░▒ stack overflow ${System.nanoTime() % 99999}", 'bold', 'magenta')).append("\r\n") }
         pushTo(target, junk.toString())
         return TerminalFormatter.formatText("👻 Flooded ${target}'s terminal.", 'bold', 'green') + "\r\n"
+    }
+
+    /**
+     * Ghost's `siphon <target>`: the Saboteur's real teeth — strip one symbol off an adjacent ENEMY
+     * Lambda and scatter it back to the matrix (denial). The referee mutation is identity-blind, so
+     * siphoning the decoy succeeds identically (the bluff working = you "wasted" it). Cooldown-gated.
+     */
+    String siphonFromFor(String casterUsername, String targetName) {
+        def gate = verbGate(casterUsername, 'DIGITAL_GHOST', "'siphon' is the Ghost (Saboteur) team ability.", targetName)
+        if (gate.fail) return gate.msg
+        String target = gate.target
+        if (!siphonReady(casterUsername)) {
+            long wait = ((SIPHON_COOLDOWN_MS - (System.currentTimeMillis() - lastSiphonAt[casterUsername])) / 1000) + 1
+            return TerminalFormatter.formatText("Siphon coil recharging — ${wait as int}s.", 'italic', 'cyan') + "\r\n"
+        }
+        // Identity-blind: null means "no siphonable symbol" — same text whether decoy-with-none or non-Lambda.
+        def stolen = clusterMatchService.siphonSymbolFrom(target)
+        if (!stolen) return warn("${target} is carrying no siphonable symbol.")
+        markSiphon(casterUsername)
+        pushTo(target, TerminalFormatter.formatText("\r\n🩸 The ${stolen} symbol was siphoned from you and scattered back to the matrix.", 'bold', 'red'))
+        return TerminalFormatter.formatText("👻 Siphoned ${stolen} from ${target} — scattered back to the board.", 'bold', 'green') + "\r\n"
     }
 
     // Shared verb gate: in an ACTIVE match, caster has the right role, target resolves (case-insensitive),

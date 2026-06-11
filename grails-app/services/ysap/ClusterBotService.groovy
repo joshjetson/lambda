@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 class ClusterBotService {
 
     def clusterMatchService
+    def clusterRoleService
     def telnetServerService
 
     private final ScheduledExecutorService botScheduler = Executors.newScheduledThreadPool(1)
@@ -81,7 +82,38 @@ class ClusterBotService {
     }
 
     void tickAllActiveMatches() {
-        clusterMatchService.activeMatchIds().each { id -> advanceBots(id); checkBotWin(id) }
+        clusterMatchService.activeMatchIds().each { id -> advanceBots(id); checkBotWin(id); botSiphonPass(id) }
+    }
+
+    /**
+     * Scheduler-only (OUT of advanceBots, mirroring checkBotWin): each bot Saboteur (Ghost) adjacent to
+     * a symbol-holding enemy Lambda siphons one symbol back to the board — so the AI threat is REAL, not
+     * a Ghost that walks up and does nothing. Shares the human siphon cooldown so a human Lambda can't be
+     * chain-drained every 7s tick. Kept off the harness-driven path so tests fire it deterministically.
+     */
+    void botSiphonPass(String matchId) {
+        def facts = clusterMatchService.botFactsForMatch(matchId)
+        if (!facts) return
+        def holdingLambdas = facts.findAll { it.role == 'CLASSIC_LAMBDA' && it.heldCount >= 1 && it.x != null && it.y != null }
+        if (!holdingLambdas) return
+        facts.findAll { it.isBot && it.role == 'DIGITAL_GHOST' && it.x != null && it.y != null }.each { ghost ->
+            def victim = holdingLambdas.find { it.team != ghost.team && cheb(ghost, it) <= 1 }
+            if (victim && clusterRoleService.siphonReady(ghost.username)) {
+                def sym = clusterMatchService.siphonSymbolFrom(victim.username)
+                if (sym) {
+                    clusterRoleService.markSiphon(ghost.username)
+                    if (!victim.isBot) notifySiphon(victim.username, sym)
+                }
+            }
+        }
+    }
+
+    // Tell a human victim a bot Ghost just stripped a symbol (so the loss of progress is legible).
+    private void notifySiphon(String victimUsername, String symbol) {
+        try {
+            def w = telnetServerService.writerForUsername(victimUsername)
+            if (w) { w.print(TerminalFormatter.formatText("\r\n🩸 The ${symbol} symbol was siphoned by an enemy Ghost and scattered back to the matrix.", 'bold', 'red') + "\r\n"); w.flush() }
+        } catch (Exception ignored) { }
     }
 
     /** Spread each bot to a spawn tile (seeded → deterministic): ALPHA low quadrant, BETA high. */

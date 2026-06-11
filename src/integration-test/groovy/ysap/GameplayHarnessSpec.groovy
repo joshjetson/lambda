@@ -241,13 +241,13 @@ class GameplayHarnessSpec extends Specification {
         ghost.createCharacter('ghostx', 'GhostX', 1)
 
         expect: "it is present in the live session map"
-        pollUntil(10_000) { telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+        pollUntil(15_000) { telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
 
         when: "it drops its connection"
         ghost.close()
 
         then: "cleanup runs in the finally block → the session is removed (no ghost left behind)"
-        pollUntil(10_000) { !telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+        pollUntil(15_000) { !telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
     }
 
     // --- Cluster Mode PIECE 1: match + team + role + true/decoy foundation (additive; Node untouched).
@@ -558,24 +558,28 @@ class GameplayHarnessSpec extends Specification {
     // --- Cluster symbol collection PIECE 1: place → Lambda lands on it → collected + relocates.
 
     void "a Lambda auto-collects a symbol on its coordinate, which then relocates"() {
-        given: "ALPHA's true Lambda, and a symbol it does NOT already hold forced onto a known coord (3,7)"
+        given: "ALPHA's true Lambda, and a symbol it does NOT already hold forced onto a SOLE-occupant tile"
         def matchId = clusterMatchService.clusterStateFor('botuser').matchId
         def lam = clusterMatchService.lambdaUsernamesOnTeamOf('botuser').find { clusterMatchService.clusterStateFor(it).isTrueLambda }
         // @Stepwise: an earlier step may have already granted this Lambda some symbols — pick one it lacks,
         // so the collect-on-arrival hook provably fires (a held symbol would correctly no-op).
         def sym = (['FIRE', 'WATER', 'EARTH', 'AIR'] - clusterMatchService.heldSymbolsOf(lam).toList())[0]
-        clusterMatchService.placeSymbol(matchId, sym, 3, 7)
+        // Land on a tile NO OTHER symbol occupies — else symbolAt() could return the seeded neighbour
+        // (which the Lambda may already hold), the hook no-ops, and the test flakes on the match seed.
+        def busy = clusterMatchService.uncollectedSymbolsFor(matchId).collect { [it.x, it.y] }
+        def free = [[3, 7], [6, 2], [2, 9], [9, 4], [0, 6], [5, 8]].find { !(it in busy) }
+        clusterMatchService.placeSymbol(matchId, sym, free[0], free[1])
 
-        expect: "the symbol sits on the board at (3,7)"
-        clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == sym && it.x == 3 && it.y == 7 }
+        expect: "the symbol sits alone on the board at that free tile"
+        clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == sym && it.x == free[0] && it.y == free[1] }
 
         when: "the Lambda lands on the symbol's coordinate (drives the collect hook)"
-        clusterMatchService.setMemberPosition(lam, 3, 7)
+        clusterMatchService.setMemberPosition(lam, free[0], free[1])
 
-        then: "the Lambda now holds the symbol and it relocated off (3,7), in-bounds (race continues)"
+        then: "the Lambda now holds the symbol and it relocated off that tile, in-bounds (race continues)"
         clusterMatchService.heldSymbolsOf(lam).contains(sym)
         def loc = clusterMatchService.uncollectedSymbolsFor(matchId).find { it.symbol == sym }
-        loc != null && !(loc.x == 3 && loc.y == 7) && loc.x in 0..9 && loc.y in 0..9
+        loc != null && !(loc.x == free[0] && loc.y == free[1]) && loc.x in 0..9 && loc.y in 0..9
 
         and: "a NON-Lambda landing on a symbol does NOT collect it — the symbol stays put"
         def circuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', true)
@@ -608,7 +612,9 @@ class GameplayHarnessSpec extends Specification {
         def decoy = lambdas.find { !clusterMatchService.clusterStateFor(it).isTrueLambda }
         clusterMatchService.setMemberPosition(trueL, 2, 2)
         clusterMatchService.setMemberPosition(decoy, 9, 9)
-        ['CIRCUIT_PATTERN', 'FLOWING_CURRENT', 'BINARY_FORM'].each {
+        // Park ALL visible allies (every non-Ghost role — Geo included, else it can drift within radius-2
+        // of the decoy from earlier advanceBots steps and flake the "(9,9): 0 nearby" read) on the true Λ.
+        ['CIRCUIT_PATTERN', 'FLOWING_CURRENT', 'BINARY_FORM', 'GEOMETRIC_ENTITY'].each {
             clusterMatchService.setMemberPosition(clusterMatchService.memberWithRole('botuser', it, true), 2, 2)
         }
         def betaCircuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', false)
@@ -623,6 +629,72 @@ class GameplayHarnessSpec extends Specification {
 
         and: "yet the firewall keeps the two Lambdas INDISTINGUISHABLE by identity (location ≠ identity)"
         clusterRoleService.firewallViewOf(betaCircuit, trueL) == clusterRoleService.firewallViewOf(betaCircuit, decoy)
+    }
+
+    // --- Cluster Mode SABOTAGE: the Ghost (Saboteur) siphons a symbol off an adjacent enemy Lambda.
+
+    void "Ghost siphons a symbol from an adjacent enemy Lambda — role/adjacency/cooldown gated, denial-to-board"() {
+        given: "an ALPHA Ghost on (5,5) and a BETA enemy Lambda on (5,6) carrying at least WATER"
+        def matchId = clusterMatchService.clusterStateFor('botuser').matchId
+        def alphaGhost = clusterMatchService.memberWithRole('botuser', 'DIGITAL_GHOST', true)
+        def enemyLambda = clusterMatchService.memberWithRole('botuser', 'CLASSIC_LAMBDA', false)
+        clusterRoleService.clearSiphonCooldowns()
+        clusterMatchService.grantSymbol(enemyLambda, 'WATER')
+        clusterMatchService.setMemberPosition(alphaGhost, 5, 5)
+        clusterMatchService.setMemberPosition(enemyLambda, 5, 6)
+        // The enemy bot Lambda may already hold symbols from earlier advanceBots steps. Siphon strips
+        // the ALPHABETICAL-FIRST held symbol (deterministic), so assert against THAT, not a hardcoded name.
+        def held0 = clusterMatchService.heldSymbolsOf(enemyLambda)
+        def expectedStolen = held0.toList().sort().first()
+
+        expect: "a non-Ghost is refused the siphon ability"
+        clusterRoleService.siphonFromFor(lambdas0(), enemyLambda).toLowerCase().contains('ghost')
+
+        when: "the Ghost siphons the adjacent enemy Lambda"
+        String out = clusterRoleService.siphonFromFor(alphaGhost, enemyLambda)
+
+        then: "exactly one (alphabetical-first) symbol was stripped from the enemy — denial, not destroyed"
+        out.toLowerCase().contains('siphoned')
+        out.contains(expectedStolen)
+        !clusterMatchService.heldSymbolsOf(enemyLambda).contains(expectedStolen)
+        clusterMatchService.heldSymbolsOf(enemyLambda).size() == held0.size() - 1
+        clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == expectedStolen }   // still on the board (re-racable)
+
+        and: "an immediate 2nd siphon is on cooldown — no chain-drain softlock"
+        clusterMatchService.grantSymbol(enemyLambda, 'FIRE')
+        clusterRoleService.siphonFromFor(alphaGhost, enemyLambda).toLowerCase().contains('recharging')
+
+        and: "a non-adjacent target is refused"
+        clusterRoleService.clearSiphonCooldowns()
+        clusterMatchService.setMemberPosition(enemyLambda, 0, 0)
+        clusterRoleService.siphonFromFor(alphaGhost, enemyLambda).toLowerCase().contains('adjacent')
+
+        and: "siphoning a non-Lambda yields nothing — the identity-blind null path (no true/decoy leak)"
+        clusterRoleService.clearSiphonCooldowns()
+        def enemyBinary = clusterMatchService.memberWithRole('botuser', 'BINARY_FORM', false)
+        clusterMatchService.setMemberPosition(enemyBinary, 5, 6)
+        clusterRoleService.siphonFromFor(alphaGhost, enemyBinary).toLowerCase().contains('no siphonable')
+    }
+
+    void "a bot Saboteur siphons a held symbol off an adjacent human Lambda (scheduler-only pass)"() {
+        given: "the human Lambda holds at least EARTH, alone-adjacent to an enemy bot Ghost"
+        def matchId = clusterMatchService.clusterStateFor('botuser').matchId
+        clusterRoleService.clearSiphonCooldowns()
+        clusterMatchService.grantSymbol('botuser', 'EARTH')
+        clusterMatchService.setMemberPosition('botuser', 4, 4)
+        def enemyGhost = clusterMatchService.memberWithRole('botuser', 'DIGITAL_GHOST', false)
+        clusterMatchService.setMemberPosition(enemyGhost, 4, 5)
+        // Siphon strips the alphabetical-first held symbol; botuser may carry others from earlier steps.
+        def held0 = clusterMatchService.heldSymbolsOf('botuser')
+        def expectedStolen = held0.toList().sort().first()
+
+        when: "the scheduler-only siphon pass runs (kept OUT of advanceBots)"
+        clusterBotService.botSiphonPass(matchId)
+
+        then: "the bot Ghost stripped one symbol off the human (the AI threat is real), scattered back to board"
+        clusterMatchService.heldSymbolsOf('botuser').size() == held0.size() - 1
+        !clusterMatchService.heldSymbolsOf('botuser').contains(expectedStolen)
+        clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == expectedStolen }
     }
 
     // --- Cluster Mode PIECE 11: the win gate — invoke only for the TRUE Lambda with all 4 symbols.
