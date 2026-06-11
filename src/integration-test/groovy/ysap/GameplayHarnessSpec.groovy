@@ -322,6 +322,10 @@ class GameplayHarnessSpec extends Specification {
         s.trueLambdasPerTeam['ALPHA'] == 1
         s.trueLambdasPerTeam['BETA'] == 1
         s.bots > 0
+
+        and: "an ACTIVE status now shows the race scoreboard (support roles can read the race too)"
+        def active = bot.command('cluster status').toLowerCase()
+        active.contains('cluster race') && active =~ /\d\/4/
     }
 
     // --- Cluster Mode PIECE 3: enemy-view identity firewall.

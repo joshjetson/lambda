@@ -432,6 +432,20 @@ class ClusterMatchService {
             box.addLine("  Symbols: ${held ? held.join(', ') : 'none'} (${held.size()}/4)")
         }
 
+        // The race scoreboard — every teammate (Lambda or support role) sees how their cluster's two
+        // Lambdas are doing, so a Saboteur/Tracker knows whether to press the attack or defend. Within
+        // the firewall: these are the viewer's OWN team, so true/decoy is teammate-visible.
+        if (match.state == 'ACTIVE') {
+            def teamLambdas = team.members.findAll { it.role == 'CLASSIC_LAMBDA' }.sort { it.username }
+            if (teamLambdas) {
+                box.addEmptyLine().addLine("  Cluster race (your Lambdas):")
+                teamLambdas.each { L ->
+                    def tag = L.isTrueLambda ? '★ TRUE ' : '☆ DECOY'
+                    box.addLine("   ${tag}  ${L.username} · ${parseSymbols(L.heldSymbols).size()}/4")
+                }
+            }
+        }
+
         box.addEmptyLine().addLine("  Team roster:")
         team.members.sort { it.username }.each { mem ->
             box.addLine("   - ${mem.username}  -  ${roleLabel(mem.role)}")
