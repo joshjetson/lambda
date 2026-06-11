@@ -71,6 +71,9 @@ class TelnetServerService {
             'heap': { player, command, parts, writer ->
                 chatService.enterChat(player, writer)
             },
+            'mingle': { player, command, parts, writer ->   // documented alias for entering the heap
+                chatService.enterChat(player, writer)
+            },
             'defrag': { player, command, parts, writer ->
                 def result = defragBotService.handleDefragCommandFromTelnet(command, player, writer)
                 // Also need to track the encounter in the activeDefragSessions

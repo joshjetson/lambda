@@ -699,7 +699,7 @@ class LambdaPlayerService {
                     fragmentFile.append("Quantity: ${fragment.quantity ?: 1}\r\n")
                     def dateStr = fragment.discoveredDate ? new java.text.SimpleDateFormat('yyyy-MM-dd HH:mm').format(fragment.discoveredDate) : 'Unknown'
                     fragmentFile.append("Discovered: ${dateStr}\r\n")
-                    fragmentFile.append("${fragment.pythonCapability ?: 'No capability data'}\r\n\r\n")
+                    fragmentFile.append("${formatCapability(fragment.pythonCapability)}\r\n\r\n")
                 }
             }
         } else {
@@ -717,8 +717,13 @@ class LambdaPlayerService {
         content.append("Power Level: ${fragment.powerLevel}/10\r\n")
         content.append("Description: ${fragment.description}\r\n\r\n")
         content.append("Python Capability:\r\n")
-        content.append("${fragment.pythonCapability}\r\n")
+        content.append("${formatCapability(fragment.pythonCapability)}\r\n")
         return content.toString()
+    }
+
+    // pythonCapability is stored with literal "\n" separators; render them as real telnet line breaks.
+    private String formatCapability(String cap) {
+        return (cap ?: 'No capability data').replace('\\n', '\r\n')
     }
 
     private LogicFragment findPlayerFragment(LambdaPlayer player, String fragmentName) {

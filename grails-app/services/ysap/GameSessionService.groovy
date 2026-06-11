@@ -329,8 +329,11 @@ class GameSessionService {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dy = -1; dy <= 1; dy++) {
                     if (dx == 0 && dy == 0) continue
-                    def scanX = Math.max(0, Math.min(9, player.positionX + dx))
-                    def scanY = Math.max(0, Math.min(9, player.positionY + dy))
+                    def scanX = player.positionX + dx
+                    def scanY = player.positionY + dy
+                    // Skip out-of-bounds neighbors — clamping them used to collapse several offsets
+                    // onto the same edge coord (and the player's own tile), producing duplicates.
+                    if (scanX < 0 || scanX > 9 || scanY < 0 || scanY > 9) continue
                     def nearbyHealth = coordinateStateService.getCoordinateHealth(player.currentMatrixLevel, scanX, scanY)
                     if (nearbyHealth.health < 100) {
                         nearbyDamaged.add("(${scanX},${scanY}): ${nearbyHealth.health}% ${nearbyHealth.status}")
