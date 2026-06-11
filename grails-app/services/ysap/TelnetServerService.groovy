@@ -543,6 +543,12 @@ class TelnetServerService {
                                     if (!enterResult.continueGame) {
                                         // Mini-game completed - continue to next iteration of main game loop
                                         audioService.playSound(enterResult.success ? "victory" : "error")
+                                        // Refresh the session player so a just-won bit reward shows in status
+                                        // immediately (completeRepair credited bits via a fresh DB load).
+                                        LambdaPlayer.withTransaction {
+                                            def refreshed = LambdaPlayer.get(player.id)
+                                            if (refreshed) { player = refreshed; playerSessions[writer] = refreshed }
+                                        }
                                         continue // Continue main game loop instead of exiting connection
                                     }
                                 } else {
