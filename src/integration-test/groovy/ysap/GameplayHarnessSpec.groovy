@@ -706,6 +706,12 @@ class GameplayHarnessSpec extends Specification {
         clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == expectedStolen }
     }
 
+    void "a bot-Lambda win reads as a WIN to its own cluster and a LOSS to the other (legible outcome)"() {
+        expect: "a human on the winning team sees victory; a human on the other team sees defeat"
+        ClusterBotService.botWinLineFor('ALPHA', 'ALPHA').toLowerCase().contains('your cluster wins')
+        ClusterBotService.botWinLineFor('BETA', 'ALPHA').toLowerCase().contains('lost')
+    }
+
     // --- Cluster Mode PIECE 11: the win gate — invoke only for the TRUE Lambda with all 4 symbols.
     // (Last cluster step: a win ends the match.)
 

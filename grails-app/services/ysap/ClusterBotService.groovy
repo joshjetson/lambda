@@ -166,15 +166,25 @@ class ClusterBotService {
         if (winner) declareBotWin(matchId, winner.username)
     }
 
-    // The AI won: end the match and tell every human still in it (so a loss is legible, not a silent drop).
+    // A bot true-Lambda escaped: end the match and tell every human — framed by THEIR team, so the
+    // outcome is legible. A human on the winning cluster (e.g. a Saboteur who screened their Lambda)
+    // sees a win; the losing cluster sees a loss. Same event, opposite meaning per side.
     private void declareBotWin(String matchId, String botUsername) {
         def team = clusterMatchService.declareWin(botUsername)
         clusterMatchService.botFactsForMatch(matchId).findAll { !it.isBot }.each { human ->
             try {
                 def w = telnetServerService.writerForUsername(human.username)
-                if (w) { w.print("\r\n🏆 TEAM ${team} (bots) defeated the Logic Daemon — the match is over.\r\n"); w.flush() }
+                if (!w) return
+                w.print("\r\n" + botWinLineFor(human.team as String, team as String) + "\r\n"); w.flush()
             } catch (Exception ignored) { }
         }
+    }
+
+    /** Pure (testable): the outcome line a human on `humanTeam` sees when `winningTeam` escaped. */
+    static String botWinLineFor(String humanTeam, String winningTeam) {
+        (humanTeam == winningTeam)
+            ? TerminalFormatter.formatText("🏆 YOUR CLUSTER WINS — your Lambda harnessed all 4 symbols and escaped the system!", 'bold', 'green')
+            : TerminalFormatter.formatText("💀 TEAM ${winningTeam} escaped first — your cluster lost this match. Sabotage harder next time.", 'bold', 'red')
     }
 
     // Chebyshev distance between two position-bearing maps.
