@@ -58,7 +58,9 @@ class ClusterRoleService {
             }
         }
         appendProtectionRead(box, visible)
-        box.addEmptyLine().addLine("  Ghosts are invisible to the array. Λ identity is NOT revealed — deduce it.")
+        box.addEmptyLine()
+            .addLine("  Ghosts run dark (invisible to the array).")
+            .addLine("  Λ identity is NOT revealed — deduce it from the geometry.")
         return box.build() + "\r\n"
     }
 
