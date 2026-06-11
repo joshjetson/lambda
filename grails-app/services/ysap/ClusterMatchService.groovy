@@ -40,6 +40,12 @@ class ClusterMatchService {
     // In-memory immobilize state (Current's `lock`). Keyed by username → lock expiry millis.
     private final Map<String, Long> lockUntil = new ConcurrentHashMap<>()
 
+    // In-memory UNCOLLECTED symbol coordinates per match (matchId → symbol → [x,y]). Same ephemeral
+    // pattern as lockUntil; collected symbols live on ClusterMembership.heldSymbols. (Kept separate
+    // from Node's level-global ElementalSymbol to avoid coupling — cluster symbols are per-match.)
+    private final Map<String, Map<String, List<Integer>>> matchSymbols = new ConcurrentHashMap<>()
+    private int relocSeq = 0
+
     void applyLock(String username, long durationMs) { lockUntil[username] = System.currentTimeMillis() + durationMs }
     void clearLock(String username) { lockUntil.remove(username) }
     boolean isLocked(String username) {
@@ -60,7 +66,7 @@ class ClusterMatchService {
         String team = null
         ClusterMatch.withTransaction {
             def m = findActiveMembership(username)
-            if (m) { team = m.team.name; m.team.match.state = 'ENDED'; m.team.match.winner = team; m.team.match.save(failOnError: true) }
+            if (m) { team = m.team.name; m.team.match.state = 'ENDED'; m.team.match.winner = team; m.team.match.save(failOnError: true); matchSymbols.remove(m.team.match.matchId) }
         }
         return team
     }
@@ -89,8 +95,68 @@ class ClusterMatchService {
     void grantSymbol(String username, String symbol) {
         ClusterMatch.withTransaction {
             def m = findActiveMembership(username)
-            if (m) { def s = parseSymbols(m.heldSymbols); s << symbol.toUpperCase(); m.heldSymbols = s.join(','); m.save(failOnError: true) }
+            if (m) addHeldSymbol(m, symbol)
         }
+    }
+
+    // Single place that appends a symbol to a membership's CSV (DRY: grantSymbol + collect-on-arrival).
+    private void addHeldSymbol(ClusterMembership m, String symbol) {
+        def s = parseSymbols(m.heldSymbols); s << symbol.toUpperCase()
+        m.heldSymbols = s.join(','); m.save(failOnError: true)
+    }
+
+    // --- on-board symbols (cluster completability) -----------------------------------------------
+
+    /** Place/seed a symbol at a coordinate in a match (seam for tests + auto-seed at start). */
+    void placeSymbol(String matchId, String symbol, int x, int y) {
+        matchSymbols.computeIfAbsent(matchId, { new ConcurrentHashMap<>() }).put(symbol.toUpperCase(), [x, y])
+    }
+
+    /** Seed all 4 elemental symbols at spread, findable coordinates (called when a match starts). */
+    void placeSymbols(String matchId) {
+        def rnd = new Random(matchId.hashCode() + 7)
+        SYMBOLS.each { placeSymbol(matchId, it, 1 + rnd.nextInt(8), 1 + rnd.nextInt(8)) }
+    }
+
+    /** Uncollected symbols still on the board for a match: [[symbol, x, y], ...]. */
+    List<Map> uncollectedSymbolsFor(String matchId) {
+        def syms = matchSymbols[matchId]
+        return syms ? syms.collect { k, v -> [symbol: k, x: v[0], y: v[1]] } : []
+    }
+
+    /** The symbol sitting on (x,y) in a match, or null. */
+    String symbolAt(String matchId, int x, int y) {
+        return matchSymbols[matchId]?.find { k, v -> v[0] == x && v[1] == y }?.key
+    }
+
+    /**
+     * Scan readout for a cluster Lambda: the elemental field reveals where the uncollected symbols
+     * are (the objective). Movement is dice-paced, so this is a fair race — walk onto one to collect.
+     */
+    String symbolHintFor(String username) {
+        String hint = ''
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (m && m.role == 'CLASSIC_LAMBDA' && m.team.match.state == 'ACTIVE') {
+                def syms = uncollectedSymbolsFor(m.team.match.matchId).sort { it.symbol }
+                if (syms) {
+                    hint = "\r\n" + TerminalFormatter.formatText("ELEMENTAL FIELD (walk onto one to collect; gather all 4 to win):", 'bold', 'magenta') + "\r\n" +
+                           syms.collect { "  ⚡ ${it.symbol} at (${it.x},${it.y})" }.join("\r\n") + "\r\n"
+                }
+            }
+        }
+        return hint
+    }
+
+    /** Relocate a symbol to a fresh in-bounds coord (the design's "dynamic relocation" — keeps the race on). */
+    void relocateSymbol(String matchId, String symbol) {
+        def syms = matchSymbols[matchId]
+        def cur = syms?.get(symbol)
+        if (!cur) return
+        def rnd = new Random((matchId + symbol).hashCode() + (relocSeq++))
+        int nx = cur[0], ny = cur[1], guard = 0
+        while (nx == cur[0] && ny == cur[1] && guard++ < 30) { nx = rnd.nextInt(10); ny = rnd.nextInt(10) }
+        syms.put(symbol, [nx, ny])
     }
 
     /** Move one symbol from caster to target (both in the same match). Returns [ok, reason]. */
@@ -230,6 +296,7 @@ class ClusterMatchService {
             match.teams.each { team -> assignTrueDecoy(team) }    // exactly one true Lambda per full team
             match.state = 'ACTIVE'
             match.save(failOnError: true)
+            placeSymbols(match.matchId)   // seed the 4 elemental symbols on the board to race for
 
             result = renderMembershipPanel(m, 'Match Started — ACTIVE')
         }
@@ -286,7 +353,10 @@ class ClusterMatchService {
     private void assignTrueDecoy(ClusterTeam team) {
         def lambdas = team.members?.findAll { it.role == 'CLASSIC_LAMBDA' } ?: []
         if (lambdas.size() >= 2 && !lambdas.any { it.isTrueLambda }) {
-            def chosen = lambdas[new Random().nextInt(lambdas.size())]
+            // A HUMAN Lambda is always the true one (so a solo human has real agency — they can win,
+            // and a bot plays the decoy). Among two humans (full multiplayer) the true one is random.
+            def pool = lambdas.findAll { !it.isBot } ?: lambdas
+            def chosen = pool[new Random().nextInt(pool.size())]
             chosen.isTrueLambda = true
             chosen.save(failOnError: true)
         }
@@ -317,6 +387,9 @@ class ClusterMatchService {
             } else {
                 box.addLine("  Lambda — awaiting the 2nd Lambda (true/decoy).")
             }
+            // Carried symbols (the race progress) — invoke at 4 to win.
+            def held = parseSymbols(m.heldSymbols)
+            box.addLine("  Symbols: ${held ? held.join(', ') : 'none'} (${held.size()}/4)")
         }
 
         box.addEmptyLine().addLine("  Team roster:")
@@ -414,7 +487,8 @@ class ClusterMatchService {
             match?.teams?.each { t ->
                 t.members.each { m ->
                     out << [team: t.name, username: m.username, role: m.role,
-                            x: m.positionX, y: m.positionY, isBot: m.isBot]
+                            x: m.positionX, y: m.positionY, isBot: m.isBot,
+                            isTrueLambda: m.isTrueLambda, heldCount: parseSymbols(m.heldSymbols).size()]
                 }
             }
         }
@@ -442,7 +516,16 @@ class ClusterMatchService {
     void setMemberPosition(String username, Integer x, Integer y) {
         ClusterMatch.withTransaction {
             def m = findActiveMembership(username)
-            if (m) { m.positionX = x; m.positionY = y; m.save(failOnError: true) }
+            if (!m) return
+            m.positionX = x; m.positionY = y; m.save(failOnError: true)
+            // Collect-on-arrival: a Lambda (true OR decoy) landing on a symbol grabs it; the symbol
+            // then relocates so the other Lambda/team keeps racing. Shared by humans AND bots (both
+            // move through this seam) — one path, no duplication. No-op for non-Lambdas / Node.
+            if (m.role == 'CLASSIC_LAMBDA' && x != null && y != null && m.team.match.state == 'ACTIVE') {
+                def matchId = m.team.match.matchId
+                def sym = symbolAt(matchId, x, y)
+                if (sym) { addHeldSymbol(m, sym); relocateSymbol(matchId, sym) }
+            }
         }
     }
 

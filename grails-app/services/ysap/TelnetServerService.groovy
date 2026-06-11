@@ -59,9 +59,10 @@ class TelnetServerService {
                 coordinateStateService.handleMoveCommand(command, player, writer)
             },
             'scan': { player, command, parts, writer ->
-                // `scan all` is the Circuit team ability inside a cluster match; otherwise normal scan.
+                // `scan all` is the Circuit team ability inside a cluster match; otherwise normal scan
+                // plus a Lambda's elemental-resonance hint (senses nearby symbols to collect).
                 def clusterScan = (parts.length > 1 && parts[1] == 'all') ? clusterRoleService.scanAll(player) : null
-                clusterScan ?: gameSessionService.scanArea(player)
+                clusterScan ?: (gameSessionService.scanArea(player) + clusterMatchService.symbolHintFor(player.username))
             },
             'sc': { player, command, parts, writer ->
                 def clusterScan = (parts.length > 1 && parts[1] == 'all') ? clusterRoleService.scanAll(player) : null

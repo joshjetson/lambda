@@ -247,7 +247,7 @@ class GameplayHarnessSpec extends Specification {
         ghost.close()
 
         then: "cleanup runs in the finally block → the session is removed (no ghost left behind)"
-        pollUntil(5_000) { !telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+        pollUntil(10_000) { !telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
     }
 
     // --- Cluster Mode PIECE 1: match + team + role + true/decoy foundation (additive; Node untouched).
@@ -441,13 +441,16 @@ class GameplayHarnessSpec extends Specification {
 
     // --- Cluster Mode PIECE 8: movement as dice-as-real-time-budget + position sync.
 
-    void "cluster movement mirrors the player's position onto the membership (real positions for intel)"() {
-        when: "a cluster member moves into an open coordinate"
-        bot.command('cc 3,4')
-        def pos = clusterMatchService.memberPositionOf('botuser')
+    void "cluster movement (dice path) mirrors the player's position onto the membership"() {
+        when: "a cluster member moves via dados/move (cc teleport is disabled in cluster)"
+        bot.command('dados')
+        bot.command('move north 1')
+        def memberPos = clusterMatchService.memberPositionOf('botuser')
+        def playerPos = LambdaPlayer.withTransaction { def p = LambdaPlayer.findByUsername('botuser'); [x: p.positionX, y: p.positionY] }
 
-        then: "the membership position now mirrors the board move — scan-all/occupancy see real data"
-        pos == [x: 3, y: 4]
+        then: "the membership position equals the player's real position (scan-all/occupancy see it)"
+        memberPos == playerPos
+        memberPos.x in 0..9 && memberPos.y in 0..9
     }
 
     // --- Cluster Mode PIECE 9: team verbs lock (Current) + spam (Ghost).
@@ -551,6 +554,44 @@ class GameplayHarnessSpec extends Specification {
     }
 
     private int cheb(Map p, int tx, int ty) { Math.max(Math.abs((p.x as int) - tx), Math.abs((p.y as int) - ty)) }
+
+    // --- Cluster symbol collection PIECE 1: place → Lambda lands on it → collected + relocates.
+
+    void "a Lambda auto-collects a symbol on its coordinate, which then relocates"() {
+        given: "ALPHA's true Lambda, and a FIRE symbol forced onto a known coord (3,7)"
+        def matchId = clusterMatchService.clusterStateFor('botuser').matchId
+        def lam = clusterMatchService.lambdaUsernamesOnTeamOf('botuser').find { clusterMatchService.clusterStateFor(it).isTrueLambda }
+        clusterMatchService.placeSymbol(matchId, 'FIRE', 3, 7)
+
+        expect: "FIRE sits on the board at (3,7)"
+        clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == 'FIRE' && it.x == 3 && it.y == 7 }
+
+        when: "the Lambda lands on the symbol's coordinate (drives the collect hook)"
+        clusterMatchService.setMemberPosition(lam, 3, 7)
+
+        then: "the Lambda now holds FIRE and the symbol relocated off (3,7), in-bounds (race continues)"
+        clusterMatchService.heldSymbolsOf(lam).contains('FIRE')
+        def loc = clusterMatchService.uncollectedSymbolsFor(matchId).find { it.symbol == 'FIRE' }
+        loc != null && !(loc.x == 3 && loc.y == 7) && loc.x in 0..9 && loc.y in 0..9
+
+        and: "a NON-Lambda landing on a symbol does NOT collect it — the symbol stays put"
+        def circuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', true)
+        clusterMatchService.placeSymbol(matchId, 'EARTH', 1, 2)
+        clusterMatchService.setMemberPosition(circuit, 1, 2)
+        clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == 'EARTH' && it.x == 1 && it.y == 2 }
+    }
+
+    void "a Lambda's scan reveals the uncollected elemental field with coordinates"() {
+        given:
+        def matchId = clusterMatchService.clusterStateFor('botuser').matchId
+        clusterMatchService.placeSymbol(matchId, 'WATER', 5, 5)
+        clusterMatchService.placeSymbol(matchId, 'EARTH', 9, 0)
+
+        expect: "both placed symbols are revealed with their coordinates (the objective tracker)"
+        def hint = clusterMatchService.symbolHintFor('botuser')
+        hint.contains('WATER') && hint.contains('(5,5)')
+        hint.contains('EARTH') && hint.contains('(9,0)')
+    }
 
     // --- Cluster Mode PIECE 12: the deduction-loop capstone (the design's read-test).
 

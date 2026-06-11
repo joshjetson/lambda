@@ -305,6 +305,11 @@ class CoordinateStateService {
         println "Updating board position for ${player.displayName} at Matrix Level ${player.currentMatrixLevel} (${player.positionX},${player.positionY})"
     }
     String handleCoordinateChange(String command, LambdaPlayer player, PrintWriter writer) {
+        // No free teleport inside a cluster match — movement is dice-paced (dados/move) so the
+        // symbol race and the sabotage layer actually matter. cc stays for Node exploration.
+        if (clusterMatchService.isInActiveMatch(player.username)) {
+            return TerminalFormatter.formatText("⚡ No teleport in a cluster match — roll 'dados' and 'move' to travel.", 'bold', 'yellow') + "\r\n"
+        }
         def parts = command.trim().split(' ')
 
         // Validate command format: cc (x,y) or cc x,y or cc x y
@@ -458,7 +463,10 @@ class CoordinateStateService {
             specialItemService.consumeEffect(player, 'STEALTH_CLOAK')
         }
 
-        if (!inSafeZone && Math.random() < encounterChance) {
+        // No Node defrag encounters inside a cluster match — the match has its own bot threats
+        // (deployed bots, enemy hunters); mixing in solo-mode defrag would be confusing.
+        boolean inCluster = clusterMatchService.isInActiveMatch(player.username)
+        if (!inSafeZone && !inCluster && Math.random() < encounterChance) {
             def defragBot = defragBotService.spawnDefragBot(player.currentMatrixLevel, 1, newX, newY)
             if (defragBot) {
                 telnetServerService.activeDefragSessions[writer] = defragBot

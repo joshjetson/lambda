@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 class ClusterBotService {
 
     def clusterMatchService
+    def telnetServerService
 
     private final ScheduledExecutorService botScheduler = Executors.newScheduledThreadPool(1)
 
@@ -49,6 +50,13 @@ class ClusterBotService {
         int phase = tick.intdiv(8) % 2          // shift objectives every 8 ticks so they keep moving
         return OBJECTIVES[idx + 2 * phase]      // idx0 → corner 0 or 2; idx1 → corner 1 or 3 (always apart)
     }
+    // collect: bot Lambdas head for the nearest uncollected symbol → a real race the human can lose.
+    private final Closure collectIntent = { Map bot, Map snapshot ->
+        def syms = snapshot.symbols
+        if (!syms) return wander.call(bot, snapshot)
+        def near = syms.min { cheb(bot, [x: it.x, y: it.y]) }
+        return [near.x, near.y]
+    }
 
     private final Map<String, Closure> intentTargets = [
         'CIRCUIT_PATTERN' : escortSpread,   // Tracker guards its Lambdas (intel near them)
@@ -56,18 +64,18 @@ class ClusterBotService {
         'FLOWING_CURRENT' : escortSpread,   // Disruptor screens its Lambdas
         'GEOMETRIC_ENTITY': huntEnemy,      // Scout pushes into enemy ground
         'DIGITAL_GHOST'   : huntEnemy,      // Saboteur infiltrates the enemy Lambdas
-        'CLASSIC_LAMBDA'  : wander,         // Lambdas drift toward objectives
+        'CLASSIC_LAMBDA'  : collectIntent,  // Lambdas race for the symbols (collect on arrival)
     ]
 
     /** Start the live tick (wired in BootStrap). Thin: just drives advanceBots on a timer. */
     void startBotSystem() {
         botScheduler.scheduleAtFixedRate({
             try { tickAllActiveMatches() } catch (Exception e) { println "Cluster bot tick error: ${e.message}" }
-        } as Runnable, 5, 5, TimeUnit.SECONDS)
+        } as Runnable, 7, 7, TimeUnit.SECONDS)   // bots step ~every 7s — an active human out-paces them
     }
 
     void tickAllActiveMatches() {
-        clusterMatchService.activeMatchIds().each { advanceBots(it) }
+        clusterMatchService.activeMatchIds().each { id -> advanceBots(id); checkBotWin(id) }
     }
 
     /** Spread each bot to a spawn tile (seeded → deterministic): ALPHA low quadrant, BETA high. */
@@ -96,14 +104,38 @@ class ClusterBotService {
         }
         tick++
         def positionedLambdas = facts.findAll { it.role == 'CLASSIC_LAMBDA' && it.x != null && it.y != null }
+        def symbols = clusterMatchService.uncollectedSymbolsFor(matchId)
         facts.findAll { it.isBot && it.x != null && it.y != null }.each { bot ->
             def snapshot = [ownLambdas:   positionedLambdas.findAll { it.team == bot.team },
-                            enemyLambdas: positionedLambdas.findAll { it.team != bot.team }]
+                            enemyLambdas: positionedLambdas.findAll { it.team != bot.team },
+                            symbols:      symbols]
             def target = (intentTargets[bot.role] ?: wander).call(bot, snapshot)
             if (target != null) {
                 def step = stepToward(bot.x as int, bot.y as int, target[0] as int, target[1] as int)
-                clusterMatchService.setMemberPosition(bot.username, step[0], step[1])
+                clusterMatchService.setMemberPosition(bot.username, step[0], step[1])   // collects on arrival
             }
+        }
+    }
+
+    /**
+     * Scheduler-only: a bot TRUE Lambda that has gathered all 4 symbols invokes the daemon and wins.
+     * Kept OUT of advanceBots so the synchronously-driven harness never ends a match mid-test.
+     */
+    void checkBotWin(String matchId) {
+        def winner = clusterMatchService.botFactsForMatch(matchId).find {
+            it.isBot && it.role == 'CLASSIC_LAMBDA' && it.isTrueLambda && it.heldCount >= 4
+        }
+        if (winner) declareBotWin(matchId, winner.username)
+    }
+
+    // The AI won: end the match and tell every human still in it (so a loss is legible, not a silent drop).
+    private void declareBotWin(String matchId, String botUsername) {
+        def team = clusterMatchService.declareWin(botUsername)
+        clusterMatchService.botFactsForMatch(matchId).findAll { !it.isBot }.each { human ->
+            try {
+                def w = telnetServerService.writerForUsername(human.username)
+                if (w) { w.print("\r\n🏆 TEAM ${team} (bots) defeated the Logic Daemon — the match is over.\r\n"); w.flush() }
+            } catch (Exception ignored) { }
         }
     }
 
