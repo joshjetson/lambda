@@ -14,6 +14,9 @@ import java.util.concurrent.ConcurrentHashMap
 class ClusterMatchService {
 
     static final int TEAM_CAP = 7
+    // Panels are kept narrow enough to render inside the HUD's command panel (58-wide) as well as the
+    // normal terminal — one width used everywhere (DRY). Cluster role panels reuse the same constant.
+    static final int PANEL_WIDTH = 50
 
     // A full team = 2 Lambdas + one of each of the other 5 roles (race once per team, Lambda twice).
     private static final List<String> CANON_TEAM = [
@@ -265,9 +268,10 @@ class ClusterMatchService {
         def need = new ArrayList<String>(CANON_TEAM)
         team.members?.each { mem -> need.remove(mem.role) }   // remove ONE canon slot per existing seat
         int n = 0
+        def tag = team.name[0] + (team.match.matchId.takeRight(3))   // e.g. A640 — short + match-scoped
         need.each { role ->
             team.addToMembers(new ClusterMembership(
-                username: "bot_${team.name.toLowerCase()}_${role.toLowerCase()}_${++n}",
+                username: "bot_${tag}${++n}",   // bot_A6401 … short, readable, fits the HUD panel
                 role: role, isBot: true))
         }
         team.save(failOnError: true)
@@ -297,21 +301,21 @@ class ClusterMatchService {
     private String renderMembershipPanel(ClusterMembership m, String title) {
         def team = m.team
         def match = team.match
-        def box = new BoxBuilder(70)
+        def box = new BoxBuilder(PANEL_WIDTH)
             .addCenteredLine(TerminalFormatter.formatText("⬡ ${title}", 'bold', 'cyan'))
             .addSeparator()
-            .addLine("  Match: ${match.matchId}    State: ${match.state}")
-            .addLine("  Team:  ${team.name}")
+            .addLine("  Match: ${match.matchId}")
+            .addLine("  State: ${match.state}   Team: ${team.name}")
             .addLine("  Role:  ${roleLabel(m.role)}")
 
         if (m.role == 'CLASSIC_LAMBDA') {
             def lambdas = team.members.findAll { it.role == 'CLASSIC_LAMBDA' }
             if (lambdas.any { it.isTrueLambda }) {
                 box.addLine(m.isTrueLambda
-                    ? "  ${TerminalFormatter.formatText('You are the TRUE Lambda — only you can win with the symbols.', 'bold', 'green')}"
-                    : "  ${TerminalFormatter.formatText("You are the DECOY — draw their fire; you can't cash symbols in.", 'bold', 'yellow')}")
+                    ? "  ${TerminalFormatter.formatText('You are the TRUE Lambda (only you can win).', 'bold', 'green')}"
+                    : "  ${TerminalFormatter.formatText("You are the DECOY (you can't cash symbols in).", 'bold', 'yellow')}")
             } else {
-                box.addLine("  Lambda — awaiting the second Lambda before true/decoy is set.")
+                box.addLine("  Lambda — awaiting the 2nd Lambda (true/decoy).")
             }
         }
 
@@ -323,14 +327,14 @@ class ClusterMatchService {
     }
 
     private String clusterUsage() {
-        def box = new BoxBuilder(70)
+        def box = new BoxBuilder(PANEL_WIDTH)
             .addCenteredLine(TerminalFormatter.formatText("⬡ CLUSTER MODE", 'bold', 'cyan'))
             .addSeparator()
-            .addLine("  cluster create   - start a new 7v7 match (you join TEAM ALPHA)")
-            .addLine("  cluster join     - join an open cluster lobby")
-            .addLine("  cluster start    - fill empty seats with bots and begin the match")
-            .addLine("  cluster status   - your match, team, role, and (Lambda) identity")
-            .addLine("  cluster leave    - leave your current match")
+            .addLine("  cluster create - new 7v7 match (TEAM ALPHA)")
+            .addLine("  cluster join   - join an open lobby")
+            .addLine("  cluster start  - fill with bots and begin")
+            .addLine("  cluster status - match, team, role, identity")
+            .addLine("  cluster leave  - leave your match")
         return box.build() + "\r\n"
     }
 

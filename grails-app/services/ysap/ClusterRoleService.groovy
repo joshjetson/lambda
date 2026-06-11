@@ -63,8 +63,8 @@ class ClusterRoleService {
         // Firewall applied here (the firewall owner): Ghosts are invisible to tracking; role-class is
         // shown; the true/decoy bit is never present in the facts, so a Lambda reads generically.
         def visible = clusterMatchService.enemyRosterFacts(username).findAll { it.role != 'DIGITAL_GHOST' }
-        def box = new BoxBuilder(64)
-            .addCenteredLine(TerminalFormatter.formatText("⊹ TRACKER SWEEP — enemy positions", 'bold', 'cyan'))
+        def box = new BoxBuilder(ClusterMatchService.PANEL_WIDTH)
+            .addCenteredLine(TerminalFormatter.formatText("⊹ TRACKER SWEEP", 'bold', 'cyan'))
             .addSeparator()
         if (visible.isEmpty()) {
             box.addLine("  No trackable enemies (Ghosts run dark).")
@@ -76,8 +76,8 @@ class ClusterRoleService {
         }
         appendProtectionRead(box, visible)
         box.addEmptyLine()
-            .addLine("  Ghosts run dark (invisible to the array).")
-            .addLine("  Λ identity is NOT revealed — deduce it from the geometry.")
+            .addLine("  Ghosts run dark. Λ identity is hidden —")
+            .addLine("  deduce it from the geometry.")
         return box.build() + "\r\n"
     }
 

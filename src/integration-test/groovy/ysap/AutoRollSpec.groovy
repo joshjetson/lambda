@@ -31,7 +31,7 @@ class AutoRollSpec extends Specification {
     void "arming a player's turn schedules a pending auto-roll; firing it rolls fresh dice"() {
         given:
         def p = player('AutoRollA')
-        coordinateStateService.armTurnControls(p.username, w(), false)
+        coordinateStateService.armTurnControls(p.username, w(), true)   // auto-roll is multiplayer-only
 
         expect:
         coordinateStateService.autoRollPending(p.username)

@@ -629,11 +629,17 @@ class CoordinateStateService {
     private static final int TURN_LIMIT_SECONDS = 120
     private final Map<String, ScheduledFuture> pendingTurnTimeouts = new ConcurrentHashMap<>()
 
-    /** Arm the controls for the player whose move-turn just began: 10s auto-roll + (multiplayer) 2-min cap. */
+    /**
+     * Arm the controls for the player whose move-turn just began. ONLY in multiplayer: the 10s
+     * auto-roll and the 2-minute cap exist to keep a shared rotation moving. A solo explorer has no
+     * turn to gate, so it gets neither — the dice/turn system stays opt-in (dados/move) and never
+     * auto-rolls noise over their screen.
+     */
     void armTurnControls(String username, PrintWriter writer, boolean multiplayer) {
         if (!username) return
-        armAutoRoll(username, writer)
         cancelTurnTimeout(username)
+        if (!multiplayer) { cancelAutoRoll(username); return }
+        armAutoRoll(username, writer)
         if (multiplayer) {
             def future = autoRollScheduler.schedule({
                 try { turnTimeoutFor(username) }
