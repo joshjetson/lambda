@@ -50,6 +50,48 @@ class ClusterMatchService {
         return until == null ? 0 : Math.max(0, ((until - System.currentTimeMillis()) / 1000) as int)
     }
 
+    static final List<String> SYMBOLS = ['AIR', 'FIRE', 'EARTH', 'WATER'].asImmutable()
+
+    /** Elemental symbols an entity is currently carrying (held on the membership). */
+    Set<String> heldSymbolsOf(String username) {
+        Set<String> out = [] as Set
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            out = parseSymbols(m?.heldSymbols)
+        }
+        return out
+    }
+
+    /** Grant a symbol to an entity (collection seam; cluster pickup wires here later). */
+    void grantSymbol(String username, String symbol) {
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (m) { def s = parseSymbols(m.heldSymbols); s << symbol.toUpperCase(); m.heldSymbols = s.join(','); m.save(failOnError: true) }
+        }
+    }
+
+    /** Move one symbol from caster to target (both in the same match). Returns [ok, reason]. */
+    Map transferSymbol(String casterUsername, String targetUsername, String symbol) {
+        Map res = [ok: false, reason: '']
+        String sym = symbol?.toUpperCase()
+        if (!(sym in SYMBOLS)) { res.reason = "Unknown symbol '${symbol}'."; return res }
+        ClusterMatch.withTransaction {
+            def from = findActiveMembership(casterUsername)
+            def to = findActiveMembership(targetUsername)
+            if (!from || !to) { res.reason = 'Entity not found.'; return }
+            def fs = parseSymbols(from.heldSymbols)
+            if (!fs.contains(sym)) { res.reason = "You are not carrying the ${sym} symbol."; return }
+            fs.remove(sym); from.heldSymbols = fs.join(','); from.save(failOnError: true)
+            def ts = parseSymbols(to.heldSymbols); ts << sym; to.heldSymbols = ts.join(','); to.save(failOnError: true)
+            res.ok = true
+        }
+        return res
+    }
+
+    private static Set<String> parseSymbols(String csv) {
+        return (csv ? csv.split(',').findAll { it } : []) as Set
+    }
+
     /** Resolve a typed target name to an actual member username in the caster's match (case-insensitive). */
     String resolveTargetUsername(String casterUsername, String targetName) {
         String out = null

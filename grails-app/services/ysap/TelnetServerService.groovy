@@ -88,6 +88,13 @@ class TelnetServerService {
             'spam': { player, command, parts, writer ->
                 clusterRoleService.spamTarget(player, parts.length > 1 ? parts[1] : '') ?: TerminalFormatter.formatText("'spam' is a Cluster Mode (Ghost) ability.", 'italic', 'cyan') + "\r\n"
             },
+            'deploy': { player, command, parts, writer ->
+                def nums = parts.findAll { it.isInteger() }.collect { it as Integer }
+                clusterRoleService.deployBot(player, nums.size() > 0 ? nums[0] : null, nums.size() > 1 ? nums[1] : null) ?: TerminalFormatter.formatText("'deploy bot <x> <y>' is a Cluster Mode (Binary) ability.", 'italic', 'cyan') + "\r\n"
+            },
+            'transfer': { player, command, parts, writer ->
+                clusterRoleService.transferSymbol(player, parts.length > 1 ? parts[1] : '', parts.length > 2 ? parts[2] : '') ?: TerminalFormatter.formatText("'transfer <symbol> <teammate>' is a Cluster Mode (Lambda) ability.", 'italic', 'cyan') + "\r\n"
+            },
             'defrag': { player, command, parts, writer ->
                 def result = defragBotService.handleDefragCommandFromTelnet(command, player, writer)
                 // Also need to track the encounter in the activeDefragSessions

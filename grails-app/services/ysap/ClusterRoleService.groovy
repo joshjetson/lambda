@@ -16,7 +16,9 @@ class ClusterRoleService {
 
     static final long SCAN_COOLDOWN_MS = 8000
     static final long LOCK_MS = 60000
+    static final long DEPLOY_COOLDOWN_MS = 5000
     private final Map<String, Long> lastScanAt = new ConcurrentHashMap<>()
+    private final Map<String, Long> lastDeployAt = new ConcurrentHashMap<>()
 
     // Each role's signature active team verb (Geo's ability is passive: trap-immunity + squeeze).
     static final Map<String, String> ROLE_VERBS = [
@@ -29,6 +31,7 @@ class ClusterRoleService {
 
     def clusterMatchService
     def telnetServerService
+    def defragBotService
 
     /**
      * `scan all` — the Circuit (Tracker) team ability: enemy positions + role-class, Ghosts excluded,
@@ -93,6 +96,40 @@ class ClusterRoleService {
 
     String lockTarget(LambdaPlayer caster, String targetName) { lockTargetFor(caster.username, targetName) }
     String spamTarget(LambdaPlayer caster, String targetName) { spamTargetFor(caster.username, targetName) }
+    String deployBot(LambdaPlayer caster, Integer x, Integer y) { deployBotFor(caster.username, x, y) }
+    String transferSymbol(LambdaPlayer caster, String symbol, String targetName) { transferFor(caster.username, symbol, targetName) }
+
+    /** Binary's `deploy bot <x> <y>`: drop a defrag bot to block/guard a coordinate. Cooldown-gated. */
+    String deployBotFor(String casterUsername, Integer x, Integer y) {
+        def me = clusterMatchService.clusterStateFor(casterUsername)
+        if (!me || me.state != 'ACTIVE') return null
+        if (me.role != 'BINARY_FORM') return warn("'deploy bot' is the Binary (Trapper) team ability.")
+        if (x == null || y == null || x < 0 || x > 9 || y < 0 || y > 9) return warn("Usage: deploy bot <x> <y> (0-9).")
+        long now = System.currentTimeMillis()
+        Long last = lastDeployAt[casterUsername]
+        if (last != null && now - last < DEPLOY_COOLDOWN_MS) {
+            return TerminalFormatter.formatText("Bot factory recharging — ${(((DEPLOY_COOLDOWN_MS-(now-last))/1000)+1) as int}s.", 'italic', 'cyan') + "\r\n"
+        }
+        def bot = defragBotService.spawnDefragBot(1, 1, x, y)   // reuse the existing combat bot
+        if (!bot) return warn("Cannot deploy at (${x},${y}) — too close to spawn.")
+        lastDeployAt[casterUsername] = now
+        return TerminalFormatter.formatText("🤖 Deployed defrag bot ${bot.botId} at (${x},${y}).", 'bold', 'green') + "\r\n"
+    }
+
+    /** Lambda's `transfer <symbol> <teammate>`: hand a held symbol to a teammate carrier (the football). */
+    String transferFor(String casterUsername, String symbol, String targetName) {
+        def me = clusterMatchService.clusterStateFor(casterUsername)
+        if (!me || me.state != 'ACTIVE') return null
+        if (me.role != 'CLASSIC_LAMBDA') return warn("'transfer' is the Lambda ability (pass a symbol to a carrier).")
+        def target = clusterMatchService.resolveTargetUsername(casterUsername, targetName)
+        if (!target) return warn("No entity named '${targetName}' in this match.")
+        def them = clusterMatchService.clusterStateFor(target)
+        if (them.team != me.team) return warn("You can only pass to a teammate.")
+        def r = clusterMatchService.transferSymbol(casterUsername, target, symbol)
+        if (!r.ok) return warn(r.reason)
+        pushTo(target, TerminalFormatter.formatText("\r\n🏈 You are now carrying the ${symbol.toUpperCase()} symbol — guard it.", 'bold', 'cyan'))
+        return TerminalFormatter.formatText("🏈 Passed ${symbol.toUpperCase()} to ${target}.", 'bold', 'green') + "\r\n"
+    }
 
     /** Current's `lock`: immobilize an adjacent target for 60s. Returns null outside an active match. */
     String lockTargetFor(String casterUsername, String targetName) {

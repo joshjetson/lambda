@@ -477,4 +477,31 @@ class GameplayHarnessSpec extends Specification {
         clusterRoleService.spamTargetFor(alphaGhost, enemy).toLowerCase().contains('flooded')
         clusterRoleService.spamTargetFor(lambdas0(), enemy).toLowerCase().contains('ghost')
     }
+
+    // --- Cluster Mode PIECE 10: team verbs deploy bot (Binary) + transfer (Lambda football).
+
+    void "Binary deploys a guard bot (cooldown, role-gated); Lambda passes a symbol to a teammate only"() {
+        given:
+        def alphaBinary = clusterMatchService.memberWithRole('botuser', 'BINARY_FORM', true)
+        def alphaCircuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', true)
+
+        expect: "Binary deploys a bot; an immediate 2nd is on cooldown; a non-Binary is refused"
+        clusterRoleService.deployBotFor(alphaBinary, 4, 4).toLowerCase().contains('deployed')
+        clusterRoleService.deployBotFor(alphaBinary, 5, 5).toLowerCase().contains('recharging')
+        clusterRoleService.deployBotFor(lambdas0(), 6, 6).toLowerCase().contains('binary')
+
+        when: "the Lambda is granted WATER and passes it to a teammate"
+        clusterMatchService.grantSymbol('botuser', 'WATER')
+        String pass = clusterRoleService.transferFor('botuser', 'water', alphaCircuit)
+
+        then: "the symbol moves from the Lambda to the carrier"
+        pass.toLowerCase().contains('passed')
+        clusterMatchService.heldSymbolsOf(alphaCircuit).contains('WATER')
+        !clusterMatchService.heldSymbolsOf('botuser').contains('WATER')
+
+        and: "passing to an ENEMY is refused (teammates only), and a non-Lambda cannot transfer"
+        clusterMatchService.grantSymbol('botuser', 'FIRE')
+        clusterRoleService.transferFor('botuser', 'fire', clusterMatchService.anEnemyMemberUsername('botuser')).toLowerCase().contains('teammate')
+        clusterRoleService.transferFor(alphaBinary, 'fire', alphaCircuit).toLowerCase().contains('lambda')
+    }
 }

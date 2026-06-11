@@ -14,6 +14,7 @@ class ClusterMembership {
     Boolean isBot = false
     Integer positionX           // board position within the match (synced from LambdaPlayer / set by bot AI)
     Integer positionY
+    String heldSymbols          // comma-separated elemental symbols this entity is carrying (AIR,FIRE,...)
 
     static belongsTo = [team: ClusterTeam]
 
@@ -22,6 +23,7 @@ class ClusterMembership {
         role blank: false, maxSize: 30
         positionX nullable: true, min: 0, max: 9
         positionY nullable: true, min: 0, max: 9
+        heldSymbols nullable: true, maxSize: 40
     }
 
     String toString() { "${username} (${role}${isTrueLambda ? ', TRUE Λ' : ''})" }
