@@ -368,4 +368,27 @@ class GameplayHarnessSpec extends Specification {
     }
 
     private String lambdas0() { clusterMatchService.lambdaUsernamesOnTeamOf('botuser')[0] }
+
+    // --- Cluster Mode PIECE 5: protection-geometry correlation (leak signal #1).
+
+    void "the tracker's protection read shows escort asymmetry between the two enemy Lambdas"() {
+        given: "BETA's Circuit will read ALPHA; ALPHA's Λ are split, with escorts clustered on one"
+        def betaCircuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', false)
+        def alphaLambdas = clusterMatchService.lambdaUsernamesOnTeamOf('botuser').sort()  // [botuser, clusterb]
+        clusterMatchService.setMemberPosition(alphaLambdas[0], 5, 5)   // Λ#1 — guarded
+        clusterMatchService.setMemberPosition(alphaLambdas[1], 8, 1)   // Λ#2 — alone
+        clusterMatchService.setMemberPosition(clusterMatchService.memberWithRole('botuser', 'GEOMETRIC_ENTITY', true), 5, 6)
+        clusterMatchService.setMemberPosition(clusterMatchService.memberWithRole('botuser', 'FLOWING_CURRENT', true), 6, 5)
+
+        expect:
+        betaCircuit != null
+
+        when: "the enemy Circuit sweeps ALPHA"
+        String out = clusterRoleService.scanAllFor(betaCircuit)
+
+        then: "the read surfaces the asymmetry — Λ#1 has 2 nearby allies, Λ#2 has 0 (correlation, not identity)"
+        out.contains('(5,5): 2')
+        out.contains('(8,1): 0')
+        !out.toLowerCase().contains('true lambda')
+    }
 }

@@ -57,8 +57,23 @@ class ClusterRoleService {
                 box.addLine("  ${pos.padRight(8)} ${ClusterMatchService.roleLabel(e.role)}")
             }
         }
+        appendProtectionRead(box, visible)
         box.addEmptyLine().addLine("  Ghosts are invisible to the array. Λ identity is NOT revealed — deduce it.")
         return box.build() + "\r\n"
+    }
+
+    // PIECE 5 — leak signal #1 (protection geometry): for each enemy Λ, how many enemy allies are
+    // clustered near it (Chebyshev radius 2). More escorts ≈ likelier the real Lambda. This is the
+    // RELATIVE correlation the design calls for — a read, never an answer.
+    private void appendProtectionRead(BoxBuilder box, List<Map> visible) {
+        def lambdas = visible.findAll { it.role == 'CLASSIC_LAMBDA' && it.x != null && it.y != null }
+        def allies  = visible.findAll { it.role != 'CLASSIC_LAMBDA' && it.x != null && it.y != null }
+        if (!lambdas) return
+        box.addEmptyLine().addLine("  Protection read (allies within 2 of each Λ):")
+        lambdas.eachWithIndex { L, i ->
+            int near = allies.count { Math.max(Math.abs((it.x - L.x) as int), Math.abs((it.y - L.y) as int)) <= 2 }
+            box.addLine("   Λ#${i + 1} @ (${L.x},${L.y}): ${near} nearby ally(ies)")
+        }
     }
 
     /**
