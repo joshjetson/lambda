@@ -19,23 +19,44 @@ class ClusterBotService {
 
     private final ScheduledExecutorService botScheduler = Executors.newScheduledThreadPool(1)
 
-    // O(1) role → "where this bot wants to be" (a target [x,y] or null = hold). Open/closed: later
-    // pieces swap/extend these closures (decoy-tax spread, Lambda wander, enemy pressure).
-    private final Closure escortIntent = { Map bot, Map snapshot ->
+    private int tick = 0   // coarse clock so wandering Lambdas keep drifting (deterministic per tick)
+
+    // O(1) role → "where this bot wants to be" (a target [x,y] or null = hold). Open/closed map.
+    //
+    // escortSpread: each escort commits to ONE of its team's two Lambdas (stable hash partition) so
+    // escorts split across BOTH — paying the "decoy tax" that makes the protection geometry an
+    // ambiguous bluff for the enemy hunter rather than a giveaway. (CLUSTER_DESIGN's fun knob.)
+    private final Closure escortSpread = { Map bot, Map snapshot ->
         def ls = snapshot.ownLambdas
         if (!ls) return null
-        def near = ls.min { cheb(bot, it) }      // escort the nearest of your team's two Lambdas
+        def chosen = ls[Math.abs(bot.username.hashCode()) % ls.size()]
+        return [chosen.x, chosen.y]
+    }
+    // huntEnemy: sabotage roles close on the nearest enemy Lambda → pressure on the human's side.
+    private final Closure huntEnemy = { Map bot, Map snapshot ->
+        def ls = snapshot.enemyLambdas
+        if (!ls) return null
+        def near = ls.min { cheb(bot, it) }
         return [near.x, near.y]
     }
-    private final Closure noIntent = { Map bot, Map snapshot -> null }
+    // wander: the team's two Lambdas drift toward OPPOSITE objectives (so they spread apart and the
+    // escort split is a readable — but subtle — deduction signal, not a useless 4/4 where both
+    // adjacent Lambdas share every escort). Objectives slowly swap so the board keeps moving.
+    private static final List OBJECTIVES = [[1, 8], [8, 1], [8, 8], [1, 1]].asImmutable()
+    private final Closure wander = { Map bot, Map snapshot ->
+        def ls = snapshot.ownLambdas.sort { it.username }
+        int idx = Math.max(0, ls.findIndexOf { it.username == bot.username }) % 2
+        int phase = tick.intdiv(8) % 2          // shift objectives every 8 ticks so they keep moving
+        return OBJECTIVES[idx + 2 * phase]      // idx0 → corner 0 or 2; idx1 → corner 1 or 3 (always apart)
+    }
 
     private final Map<String, Closure> intentTargets = [
-        'CIRCUIT_PATTERN' : escortIntent,
-        'GEOMETRIC_ENTITY': escortIntent,
-        'FLOWING_CURRENT' : escortIntent,
-        'DIGITAL_GHOST'   : escortIntent,
-        'BINARY_FORM'     : escortIntent,
-        'CLASSIC_LAMBDA'  : noIntent,        // Lambdas wander → a later piece
+        'CIRCUIT_PATTERN' : escortSpread,   // Tracker guards its Lambdas (intel near them)
+        'BINARY_FORM'     : escortSpread,   // Trapper guards the approach
+        'FLOWING_CURRENT' : escortSpread,   // Disruptor screens its Lambdas
+        'GEOMETRIC_ENTITY': huntEnemy,      // Scout pushes into enemy ground
+        'DIGITAL_GHOST'   : huntEnemy,      // Saboteur infiltrates the enemy Lambdas
+        'CLASSIC_LAMBDA'  : wander,         // Lambdas drift toward objectives
     ]
 
     /** Start the live tick (wired in BootStrap). Thin: just drives advanceBots on a timer. */
@@ -67,10 +88,18 @@ class ClusterBotService {
     void advanceBots(String matchId) {
         def facts = clusterMatchService.botFactsForMatch(matchId)
         if (!facts) return
-        def byTeam = facts.groupBy { it.team }
+        // Lazily seat any bot still without a position (first tick of a freshly-started match) —
+        // self-healing, so no coupling back into the referee's start path.
+        if (facts.any { it.isBot && (it.x == null || it.y == null) }) {
+            assignSpawnPositions(matchId)
+            facts = clusterMatchService.botFactsForMatch(matchId)
+        }
+        tick++
+        def positionedLambdas = facts.findAll { it.role == 'CLASSIC_LAMBDA' && it.x != null && it.y != null }
         facts.findAll { it.isBot && it.x != null && it.y != null }.each { bot ->
-            def lambdas = byTeam[bot.team].findAll { it.role == 'CLASSIC_LAMBDA' && it.x != null && it.y != null }
-            def target = (intentTargets[bot.role] ?: noIntent).call(bot, [ownLambdas: lambdas])
+            def snapshot = [ownLambdas:   positionedLambdas.findAll { it.team == bot.team },
+                            enemyLambdas: positionedLambdas.findAll { it.team != bot.team }]
+            def target = (intentTargets[bot.role] ?: wander).call(bot, snapshot)
             if (target != null) {
                 def step = stepToward(bot.x as int, bot.y as int, target[0] as int, target[1] as int)
                 clusterMatchService.setMemberPosition(bot.username, step[0], step[1])

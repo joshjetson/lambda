@@ -1,10 +1,13 @@
 package ysap
 
+import grails.util.Environment
+
 class BootStrap {
 
     TelnetServerService telnetServerService
     BootstrapService bootstrapService
     LambdaMerchantService lambdaMerchantService
+    ClusterBotService clusterBotService
     def grailsApplication
 
     def init = { servletContext ->
@@ -16,6 +19,12 @@ class BootStrap {
         
         // Spawn Lambda merchants across all matrix levels
         lambdaMerchantService.spawnMerchantsForAllLevels()
+
+        // Start the Cluster bot tick (moves bots in ACTIVE matches; no-op until a match is running).
+        // Not in TEST: the integration suite drives advanceBots synchronously for determinism.
+        if (Environment.current != Environment.TEST) {
+            clusterBotService.startBotSystem()
+        }
         
         // Start telnet server for Lambda game (port configurable; test env uses a high port)
         Integer telnetPort = grailsApplication.config.getProperty('lambda.telnet.port', Integer) ?: 23
