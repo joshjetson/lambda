@@ -391,4 +391,32 @@ class GameplayHarnessSpec extends Specification {
         out.contains('(8,1): 0')
         !out.toLowerCase().contains('true lambda')
     }
+
+    // --- Cluster Mode PIECE 6: occupancy rules (max 4/coord, max 2/team, Geo exempt).
+
+    void "cluster occupancy enforces 2-per-team with a Geo exemption, plus a 4-per-coord backstop"() {
+        given: "two ALPHA non-Geo members parked on (4,4)"
+        def alphaL = clusterMatchService.lambdaUsernamesOnTeamOf('botuser')
+        clusterMatchService.setMemberPosition(alphaL[0], 4, 4)
+        clusterMatchService.setMemberPosition(alphaL[1], 4, 4)
+        def alphaBinary = clusterMatchService.memberWithRole('botuser', 'BINARY_FORM', true)
+        def alphaGeo = clusterMatchService.memberWithRole('botuser', 'GEOMETRIC_ENTITY', true)
+
+        expect: "a 3rd ALPHA member is refused (2/team), but a Geo may squeeze in"
+        !clusterMatchService.occupancyCheck(alphaBinary, 4, 4).allowed
+        clusterMatchService.occupancyCheck(alphaGeo, 4, 4).allowed
+
+        and: "Node players (not in a match) are never occupancy-blocked"
+        clusterMatchService.occupancyCheck('definitely_not_in_a_match', 4, 4).allowed
+
+        when: "a coordinate is artificially packed with 4 entities (1 ALPHA + 3 BETA)"
+        def betaCircuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', false)
+        def betaL = clusterMatchService.lambdaUsernamesOnTeamOf(betaCircuit)
+        [alphaBinary, betaL[0], betaL[1], betaCircuit].each { clusterMatchService.setMemberPosition(it, 7, 7) }
+        def alphaCurrent = clusterMatchService.memberWithRole('botuser', 'FLOWING_CURRENT', true)
+
+        then: "a 5th non-Geo is refused by the 4-cap, but a Geo still gets in"
+        !clusterMatchService.occupancyCheck(alphaCurrent, 7, 7).allowed
+        clusterMatchService.occupancyCheck(alphaGeo, 7, 7).allowed
+    }
 }

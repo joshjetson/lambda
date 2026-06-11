@@ -14,6 +14,7 @@ class CoordinateStateService {
     def defragBotService
     def telnetServerService
     def specialItemService
+    def clusterMatchService
 
     // Phase 10: transient per-player dice/turn state (NOT persisted — per-session), keyed by username.
     // [yDie, xDie, yBudget, xBudget, yUsed, xUsed]. Present only between `dados` and spending both axes.
@@ -365,6 +366,13 @@ class CoordinateStateService {
             } else {
                 return TerminalFormatter.formatText("Coordinate change blocked: ${movementCheck.reason}", 'bold', 'red')
             }
+        }
+
+        // Cluster occupancy: in an active match, enforce 4/coord & 2/team (Geo 5th-slot exception).
+        // No-op for Node players (occupancyCheck returns allowed when not in an active cluster).
+        def occ = clusterMatchService.occupancyCheck(player.username, newX, newY)
+        if (!occ.allowed) {
+            return TerminalFormatter.formatText("Movement blocked: ${occ.reason}", 'bold', 'red')
         }
 
         // Calculate movement direction for audio feedback

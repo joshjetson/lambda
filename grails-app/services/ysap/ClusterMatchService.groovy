@@ -133,6 +133,30 @@ class ClusterMatchService {
         return result
     }
 
+    /**
+     * Occupancy rule for entering (x,y) in a cluster match: max 4 entities per coordinate, max 2 per
+     * team — except a Geo (Scout) may take a 5th slot. Returns [allowed, reason]. allowed=true when
+     * the player is not in an active match (Node movement is unaffected). The board owns the board:
+     * CoordinateStateService calls this hook on move; this method only computes the rule.
+     */
+    Map occupancyCheck(String username, Integer x, Integer y) {
+        Map res = [allowed: true, reason: '']
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (!m || m.team.match.state != 'ACTIVE') return    // not an active cluster → no rule
+            if (m.role == 'GEOMETRIC_ENTITY') return             // Geo (Scout) ignores occupancy — squeeze-in
+            def others = m.team.match.teams.collectMany { it.members }
+                .findAll { it.username != username && it.positionX == x && it.positionY == y }
+            int sameTeam = others.count { it.team.id == m.team.id }
+            if (sameTeam >= 2) {
+                res.allowed = false; res.reason = "Coordinate (${x},${y}) already holds 2 of your team."
+            } else if (others.size() >= 4) {
+                res.allowed = false; res.reason = "Coordinate (${x},${y}) is full (4) — only a Geo may squeeze in."
+            }
+        }
+        return res
+    }
+
     // --- internals -------------------------------------------------------------------------------
 
     // Add bot members until the team matches the canonical composition (multiset difference vs the
