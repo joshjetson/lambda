@@ -396,6 +396,10 @@ class CoordinateStateService {
 
         lambdaPlayerService.movePlayer(player, player.currentMatrixLevel, newX, newY)
 
+        // Cluster: mirror the move onto the membership so scan-all/occupancy see real positions
+        // (no-op for Node players — setMemberPosition only writes if they're in an active match).
+        clusterMatchService.setMemberPosition(player.username, newX, newY)
+
         // Update the player object in the session with new coordinates
         LambdaPlayer.withTransaction {
             def updatedPlayer = LambdaPlayer.get(player.id)
@@ -488,7 +492,10 @@ class CoordinateStateService {
 
     /** `dados` — roll 2d6 (left=Y budget, right=X budget), animate ~4s, store the turn state. */
     String handleDadosCommand(LambdaPlayer player, PrintWriter writer) {
-        if (!telnetServerService.isMyMoveTurn(player.username)) {
+        // Cluster movement is dice-as-real-time-budget — no global turn lap, so one player's combat
+        // never freezes others (PLAYTEST #1/#2). Node keeps its turn rotation.
+        boolean realtime = clusterMatchService.isInActiveMatch(player.username)
+        if (!realtime && !telnetServerService.isMyMoveTurn(player.username)) {
             return TerminalFormatter.formatText("⏳ Not your move — ${telnetServerService.currentMoveTurnHolder()} is up. You can still heap, trade, recurse, defrag, scan, repair.", 'bold', 'yellow') + "\r\n"
         }
         cancelAutoRoll(player.username)   // they rolled themselves — no auto-roll
@@ -519,7 +526,8 @@ class CoordinateStateService {
 
     /** `move <dir> <count>` — spend one axis of the current roll (forfeits the rest of that axis). */
     String handleMoveCommand(String command, LambdaPlayer player, PrintWriter writer) {
-        if (!telnetServerService.isMyMoveTurn(player.username)) {
+        boolean realtime = clusterMatchService.isInActiveMatch(player.username)
+        if (!realtime && !telnetServerService.isMyMoveTurn(player.username)) {
             return TerminalFormatter.formatText("⏳ Not your move — wait for your turn to roll.", 'bold', 'yellow') + "\r\n"
         }
         def state = activeTurnState[player.username]
@@ -560,7 +568,8 @@ class CoordinateStateService {
         if (axis == 'Y') state.yUsed = true else state.xUsed = true
         if (state.yUsed && state.xUsed) {
             activeTurnState.remove(player.username)
-            telnetServerService.advanceMoveTurn()   // pass the move-turn (solo: re-arms your own 10s auto-roll)
+            // Cluster is real-time (no global lap to advance); Node passes the move-turn on.
+            if (!realtime) telnetServerService.advanceMoveTurn()
         }
 
         return moveToCoordinate(player, writer, newX, newY)

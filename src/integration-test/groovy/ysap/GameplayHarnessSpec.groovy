@@ -435,4 +435,15 @@ class GameplayHarnessSpec extends Specification {
         cleanup:
         bot.command('exit')
     }
+
+    // --- Cluster Mode PIECE 8: movement as dice-as-real-time-budget + position sync.
+
+    void "cluster movement mirrors the player's position onto the membership (real positions for intel)"() {
+        when: "a cluster member moves into an open coordinate"
+        bot.command('cc 3,4')
+        def pos = clusterMatchService.memberPositionOf('botuser')
+
+        then: "the membership position now mirrors the board move — scan-all/occupancy see real data"
+        pos == [x: 3, y: 4]
+    }
 }

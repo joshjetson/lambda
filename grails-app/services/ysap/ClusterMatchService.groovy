@@ -33,6 +33,16 @@ class ClusterMatchService {
     /** Single source of the role-name mapping (used by the panel renderer AND the firewall). */
     static String roleLabel(String role) { ROLE_LABEL[role] ?: role }
 
+    /** True when the player is in an ACTIVE cluster match (drives real-time movement + position sync). */
+    boolean isInActiveMatch(String username) {
+        boolean active = false
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            active = (m != null && m.team.match.state == 'ACTIVE')
+        }
+        return active
+    }
+
     // O(1) sub-command dispatch — no switch/if-ladder (Doctrine #2).
     private final Map<String, Closure> clusterSubcommands = [
         'create': { LambdaPlayer p -> createMatch(p) },
@@ -302,7 +312,17 @@ class ClusterMatchService {
         return out
     }
 
-    /** Set a member's board position (sync seam — used by tests now, by movement sync in PIECE 8). */
+    /** A member's current board position as [x, y] (null entries if unset). */
+    Map memberPositionOf(String username) {
+        Map out = null
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (m) out = [x: m.positionX, y: m.positionY]
+        }
+        return out
+    }
+
+    /** Set a member's board position (sync seam — used by tests + the movement sync in PIECE 8). */
     void setMemberPosition(String username, Integer x, Integer y) {
         ClusterMatch.withTransaction {
             def m = findActiveMembership(username)
