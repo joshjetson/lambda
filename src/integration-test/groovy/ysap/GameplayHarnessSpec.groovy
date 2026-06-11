@@ -297,4 +297,21 @@ class GameplayHarnessSpec extends Specification {
         then: "the usage panel's own lines appear — only the wired handler produces these, never the\n        unknown-command fallback (a positive match, robust to async auto-roll noise in the stream)"
         out.toLowerCase() =~ /cluster create|cluster join|cluster status/
     }
+
+    // --- Cluster Mode PIECE 2: bot seat-fill + match-start gate (LOBBY → ACTIVE).
+
+    void "cluster start fills both teams to 7 with bots, activates, and sets one true Lambda per team"() {
+        when: "the creator starts the match (botuser is in a LOBBY match on ALPHA)"
+        bot.command('cluster start')
+        def s = clusterMatchService.matchSummaryFor('botuser')
+
+        then: "both teams are filled to 7, the match is ACTIVE, exactly one true Lambda per team, bots present"
+        s != null
+        s.state == 'ACTIVE'
+        s.teamSizes['ALPHA'] == 7
+        s.teamSizes['BETA'] == 7
+        s.trueLambdasPerTeam['ALPHA'] == 1
+        s.trueLambdasPerTeam['BETA'] == 1
+        s.bots > 0
+    }
 }

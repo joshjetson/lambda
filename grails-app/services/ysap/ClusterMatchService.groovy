@@ -14,6 +14,12 @@ class ClusterMatchService {
 
     static final int TEAM_CAP = 7
 
+    // A full team = 2 Lambdas + one of each of the other 5 roles (race once per team, Lambda twice).
+    private static final List<String> CANON_TEAM = [
+        'CLASSIC_LAMBDA', 'CLASSIC_LAMBDA', 'CIRCUIT_PATTERN', 'GEOMETRIC_ENTITY',
+        'FLOWING_CURRENT', 'DIGITAL_GHOST', 'BINARY_FORM'
+    ].asImmutable()
+
     // The 6 ethnicities ARE the 6 Cluster roles. One source of the role-name mapping (DRY).
     private static final Map<String, String> ROLE_LABEL = [
         'CLASSIC_LAMBDA' : 'Lambda (Collector)',
@@ -28,6 +34,7 @@ class ClusterMatchService {
     private final Map<String, Closure> clusterSubcommands = [
         'create': { LambdaPlayer p -> createMatch(p) },
         'join'  : { LambdaPlayer p -> joinMatch(p) },
+        'start' : { LambdaPlayer p -> startMatch(p) },
         'status': { LambdaPlayer p -> getClusterStatus(p) },
         'leave' : { LambdaPlayer p -> leaveMatch(p) },
     ]
@@ -103,7 +110,41 @@ class ClusterMatchService {
         return result
     }
 
+    // Fill empty seats with bots so a solo human still gets a real 7v7, then lock in true/decoy per
+    // team and flip the match ACTIVE. This is the match-start gate (LOBBY → ACTIVE).
+    String startMatch(LambdaPlayer player) {
+        String result
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(player.username)
+            if (!m) { result = warn("Not in a cluster match. Use 'cluster create' first."); return }
+            def match = m.team.match
+            if (match.state != 'LOBBY') { result = warn("Match ${match.matchId} is already ${match.state}."); return }
+
+            match.teams.each { team -> fillTeamWithBots(team) }   // humans keep their seats; bots fill the rest
+            match.teams.each { team -> assignTrueDecoy(team) }    // exactly one true Lambda per full team
+            match.state = 'ACTIVE'
+            match.save(failOnError: true)
+
+            result = renderMembershipPanel(m, 'Match Started — ACTIVE')
+        }
+        return result
+    }
+
     // --- internals -------------------------------------------------------------------------------
+
+    // Add bot members until the team matches the canonical composition (multiset difference vs the
+    // human/bot seats already present). isBot=true; role drives the bot's behavior in later pieces.
+    private void fillTeamWithBots(ClusterTeam team) {
+        def need = new ArrayList<String>(CANON_TEAM)
+        team.members?.each { mem -> need.remove(mem.role) }   // remove ONE canon slot per existing seat
+        int n = 0
+        need.each { role ->
+            team.addToMembers(new ClusterMembership(
+                username: "bot_${team.name.toLowerCase()}_${role.toLowerCase()}_${++n}",
+                role: role, isBot: true))
+        }
+        team.save(failOnError: true)
+    }
 
     private ClusterMembership findActiveMembership(String username) {
         ClusterMembership.findAllByUsername(username).find { it.team?.match?.state != 'ENDED' }
@@ -160,6 +201,7 @@ class ClusterMatchService {
             .addSeparator()
             .addLine("  cluster create   - start a new 7v7 match (you join TEAM ALPHA)")
             .addLine("  cluster join     - join an open cluster lobby")
+            .addLine("  cluster start    - fill empty seats with bots and begin the match")
             .addLine("  cluster status   - your match, team, role, and (Lambda) identity")
             .addLine("  cluster leave    - leave your current match")
         return box.build() + "\r\n"
@@ -177,6 +219,22 @@ class ClusterMatchService {
             def m = findActiveMembership(username)
             if (m) out = [matchId: m.team.match.matchId, team: m.team.name, role: m.role,
                           isTrueLambda: m.isTrueLambda, state: m.team.match.state]
+        }
+        return out
+    }
+
+    /** Match-level summary for assertions: state, per-team size, per-team true-Lambda count, bot count. */
+    Map matchSummaryFor(String username) {
+        Map out = null
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (m) {
+                def match = m.team.match
+                out = [state: match.state,
+                       teamSizes: match.teams.collectEntries { [(it.name): it.members.size()] },
+                       trueLambdasPerTeam: match.teams.collectEntries { [(it.name): it.members.count { it.isTrueLambda }] },
+                       bots: match.teams.sum { it.members.count { it.isBot } } as int]
+            }
         }
         return out
     }

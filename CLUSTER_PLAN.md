@@ -108,7 +108,7 @@ on changing working movement code.
 | # | Piece | What it proves (one line) |
 |---|---|---|
 | **1 ✅** | **Match + team + role + true/decoy foundation** (domains + `ClusterMatchService.createMatch/join/assignRoles`, `cluster` command) | **DONE** — create/join/status/leave work; exactly one of two Lambdas is flagged true, visible to self only; harness 24/24; live-verified; architect APPROVE. Watch-items deferred: assignment *timing* → PIECE 2, true-Lambda-leaves orphan → PIECE 11. |
-| 2 | Lobby fill with bots + match start gate | Empty seats auto-fill so a solo human starts a 7v7; match transitions lobby→active when both teams full. |
+| 2 ✅ | Lobby fill with bots + match start gate | Empty seats auto-fill so a solo human starts a 7v7; match transitions lobby→active when both teams full. |
 | 3 | Enemy-view identity firewall (`ClusterRoleService.renderForViewer`) | An enemy scanning either Lambda gets byte-identical readout (same `Λ`, role-class, name-class); a teammate sees the true-Lambda marker; no channel leaks the bit to an enemy. |
 | 4 | `scan all` (Circuit/Tracker) — location-only intel | Circuit gets enemy *positions + role-class*, Ghosts excluded, with cooldown; output never contains identity, only locations → the deduction sensor exists. |
 | 5 | Relative-correlation read (leak signal #1, geometry) | The pooled read shows "enemy bodies within N of Λ#1 vs Λ#2" — a correlation, not an answer — built from positions + occupancy. |
