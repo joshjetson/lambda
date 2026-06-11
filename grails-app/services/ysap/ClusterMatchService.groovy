@@ -138,10 +138,13 @@ class ClusterMatchService {
         ClusterMatch.withTransaction {
             def m = findActiveMembership(username)
             if (m && m.role == 'CLASSIC_LAMBDA' && m.team.match.state == 'ACTIVE') {
-                def syms = uncollectedSymbolsFor(m.team.match.matchId).sort { it.symbol }
-                if (syms) {
-                    hint = "\r\n" + TerminalFormatter.formatText("ELEMENTAL FIELD (walk onto one to collect; gather all 4 to win):", 'bold', 'magenta') + "\r\n" +
-                           syms.collect { "  ⚡ ${it.symbol} at (${it.x},${it.y})" }.join("\r\n") + "\r\n"
+                def held = parseSymbols(m.heldSymbols)
+                def need = uncollectedSymbolsFor(m.team.match.matchId).findAll { !held.contains(it.symbol) }.sort { it.symbol }
+                if (need) {
+                    hint = "\r\n" + TerminalFormatter.formatText("ELEMENTAL FIELD — symbols you still need (walk onto one to collect):", 'bold', 'magenta') + "\r\n" +
+                           need.collect { "  ⚡ ${it.symbol} at (${it.x},${it.y})" }.join("\r\n") + "\r\n"
+                } else {
+                    hint = "\r\n" + TerminalFormatter.formatText("⚡ All 4 symbols gathered — type 'invoke' to defeat the Logic Daemon and WIN!", 'bold', 'green') + "\r\n"
                 }
             }
         }
@@ -524,7 +527,9 @@ class ClusterMatchService {
             if (m.role == 'CLASSIC_LAMBDA' && x != null && y != null && m.team.match.state == 'ACTIVE') {
                 def matchId = m.team.match.matchId
                 def sym = symbolAt(matchId, x, y)
-                if (sym) { addHeldSymbol(m, sym); relocateSymbol(matchId, sym) }
+                // Only collect a symbol you don't already hold; it then relocates so others can race
+                // for a fresh one (and your already-held targets stay put for you to navigate to).
+                if (sym && !parseSymbols(m.heldSymbols).contains(sym)) { addHeldSymbol(m, sym); relocateSymbol(matchId, sym) }
             }
         }
     }

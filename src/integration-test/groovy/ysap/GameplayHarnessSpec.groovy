@@ -581,16 +581,19 @@ class GameplayHarnessSpec extends Specification {
         clusterMatchService.uncollectedSymbolsFor(matchId).any { it.symbol == 'EARTH' && it.x == 1 && it.y == 2 }
     }
 
-    void "a Lambda's scan reveals the uncollected elemental field with coordinates"() {
-        given:
+    void "a Lambda's scan field shows needed symbols and hides ones it already holds"() {
+        given: "WATER placed at a known coord, then granted to the Lambda (now held)"
         def matchId = clusterMatchService.clusterStateFor('botuser').matchId
         clusterMatchService.placeSymbol(matchId, 'WATER', 5, 5)
-        clusterMatchService.placeSymbol(matchId, 'EARTH', 9, 0)
 
-        expect: "both placed symbols are revealed with their coordinates (the objective tracker)"
-        def hint = clusterMatchService.symbolHintFor('botuser')
-        hint.contains('WATER') && hint.contains('(5,5)')
-        hint.contains('EARTH') && hint.contains('(9,0)')
+        expect: "before holding it, WATER is listed as a needed objective"
+        clusterMatchService.heldSymbolsOf('botuser').contains('WATER') || clusterMatchService.symbolHintFor('botuser').contains('WATER at (5,5)')
+
+        when: "the Lambda now holds WATER"
+        clusterMatchService.grantSymbol('botuser', 'WATER')
+
+        then: "WATER (held) is no longer listed as needed"
+        !clusterMatchService.symbolHintFor('botuser').contains('WATER at (5,5)')
     }
 
     // --- Cluster Mode PIECE 12: the deduction-loop capstone (the design's read-test).

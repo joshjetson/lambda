@@ -50,12 +50,18 @@ class ClusterBotService {
         int phase = tick.intdiv(8) % 2          // shift objectives every 8 ticks so they keep moving
         return OBJECTIVES[idx + 2 * phase]      // idx0 → corner 0 or 2; idx1 → corner 1 or 3 (always apart)
     }
-    // collect: bot Lambdas head for the nearest uncollected symbol → a real race the human can lose.
+    // collect: head for the nearest uncollected symbol → a real race the human can lose.
     private final Closure collectIntent = { Map bot, Map snapshot ->
         def syms = snapshot.symbols
         if (!syms) return wander.call(bot, snapshot)
         def near = syms.min { cheb(bot, [x: it.x, y: it.y]) }
         return [near.x, near.y]
+    }
+    // Only the TRUE Lambda races for symbols; the decoy wanders/feints (it can still collect by
+    // chance, for the bluff, but doesn't beeline — so the board isn't churned and the human can find
+    // symbols). This keeps the active collectors to ~2 (the human + the enemy's true bot).
+    private final Closure lambdaIntent = { Map bot, Map snapshot ->
+        bot.isTrueLambda ? collectIntent.call(bot, snapshot) : wander.call(bot, snapshot)
     }
 
     private final Map<String, Closure> intentTargets = [
@@ -64,7 +70,7 @@ class ClusterBotService {
         'FLOWING_CURRENT' : escortSpread,   // Disruptor screens its Lambdas
         'GEOMETRIC_ENTITY': huntEnemy,      // Scout pushes into enemy ground
         'DIGITAL_GHOST'   : huntEnemy,      // Saboteur infiltrates the enemy Lambdas
-        'CLASSIC_LAMBDA'  : collectIntent,  // Lambdas race for the symbols (collect on arrival)
+        'CLASSIC_LAMBDA'  : lambdaIntent,   // true Lambda races for symbols; decoy feints
     ]
 
     /** Start the live tick (wired in BootStrap). Thin: just drives advanceBots on a timer. */
