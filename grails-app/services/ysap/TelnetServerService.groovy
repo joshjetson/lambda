@@ -27,7 +27,9 @@ class TelnetServerService {
     private ServerSocket serverSocket
     private int clientCount = 0
     private List<PrintWriter> clientWriters = new CopyOnWriteArrayList<>() // Thread-safe list
-    public Map<PrintWriter, LambdaPlayer> playerSessions = [:] // Track player sessions
+    // Concurrent: mutated by every client thread's finally-cleanup (remove) AND iterated by the broadcast
+    // loop / read by other threads. A plain HashMap here risks lost-update visibility and CME on iteration.
+    public Map<PrintWriter, LambdaPlayer> playerSessions = new java.util.concurrent.ConcurrentHashMap<>()
     public Map<PrintWriter, DefragBot> activeDefragSessions = [:] // Track defrag encounters  
     private Set<PrintWriter> hudModeSessions = [] as Set // Track players in HUD mode
     public Map<PrintWriter, Socket> writerSockets = [:] // Track sockets for HUD refresh
@@ -62,7 +64,7 @@ class TelnetServerService {
                 // `scan all` is the Circuit team ability inside a cluster match; otherwise normal scan
                 // plus a Lambda's elemental-resonance hint (senses nearby symbols to collect).
                 def clusterScan = (parts.length > 1 && parts[1] == 'all') ? clusterRoleService.scanAll(player) : null
-                clusterScan ?: (gameSessionService.scanArea(player) + clusterMatchService.symbolHintFor(player.username))
+                clusterScan ?: (gameSessionService.scanArea(player) + clusterMatchService.symbolHintFor(player.username) + clusterRoleService.localClusterScanFor(player.username))
             },
             'sc': { player, command, parts, writer ->
                 def clusterScan = (parts.length > 1 && parts[1] == 'all') ? clusterRoleService.scanAll(player) : null

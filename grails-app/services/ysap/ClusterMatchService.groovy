@@ -522,6 +522,29 @@ class ClusterMatchService {
         return out
     }
 
+    /**
+     * Local sensor facts: OTHER positioned members in the viewer's ACTIVE match within Chebyshev
+     * `radius`, each [username, role, x, y, sameTeam, distance]. Dumb facts only — the firewall +
+     * Ghost-stealth rule live in ClusterRoleService (the sensor owner). [] outside an active match.
+     */
+    List<Map> localMemberFactsFor(String viewerUsername, int radius) {
+        List<Map> out = []
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(viewerUsername)
+            if (!m || m.team.match.state != 'ACTIVE' || m.positionX == null || m.positionY == null) return
+            int vx = m.positionX, vy = m.positionY
+            m.team.match.teams.collectMany { it.members }.each { mem ->
+                if (mem.username == viewerUsername || mem.positionX == null || mem.positionY == null) return
+                int d = Math.max(Math.abs((mem.positionX - vx) as int), Math.abs((mem.positionY - vy) as int))
+                if (d <= radius) {
+                    out << [username: mem.username, role: mem.role, x: mem.positionX, y: mem.positionY,
+                            sameTeam: mem.team.id == m.team.id, distance: d]
+                }
+            }
+        }
+        return out.sort { it.distance }
+    }
+
     /** A member username with `role` on the player's team (sameTeam=true) or the enemy team. Seam. */
     String memberWithRole(String username, String role, boolean sameTeam) {
         String out = null

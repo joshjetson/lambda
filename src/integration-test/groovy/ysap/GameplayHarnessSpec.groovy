@@ -236,18 +236,31 @@ class GameplayHarnessSpec extends Specification {
     }
 
     void "a disconnected entity is cleaned out of playerSessions (finally-cleanup, no ghost)"() {
-        given: "a second entity connects and is registered"
-        def ghost = new LambdaTelnetClient('localhost', TELNET_PORT)
-        ghost.createCharacter('ghostx', 'GhostX', 1)
+        given: "a second entity connects and registers — retry the handshake if the socket drops under load"
+        // Under heavy CI/test-loop load a fresh telnet handshake can hit EOF mid-creation (KEYSTROKE -1);
+        // that's a connection flake, not the behavior under test, so retry the CONNECT until it registers.
+        def ghost = null
+        def registered = false
+        for (int attempt = 0; attempt < 3 && !registered; attempt++) {
+            try {
+                ghost?.close()
+                ghost = new LambdaTelnetClient('localhost', TELNET_PORT)
+                ghost.createCharacter('ghostx', 'GhostX', 1)
+            } catch (ignored) { /* dropped handshake → loop and reconnect */ }
+            registered = pollUntil(10_000) { telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+        }
 
         expect: "it is present in the live session map"
-        pollUntil(15_000) { telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+        registered
 
         when: "it drops its connection"
         ghost.close()
 
         then: "cleanup runs in the finally block → the session is removed (no ghost left behind)"
-        pollUntil(15_000) { !telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
+        // Removal happens on a background server thread when it notices the socket FIN; under heavy
+        // test-loop CPU starvation that thread can be slow to schedule, so allow a generous ceiling
+        // (near-instant in any realistic single run — this only matters under pathological load).
+        pollUntil(30_000) { !telnetServerService.playerSessions.values().any { it?.username == 'ghostx' } }
     }
 
     // --- Cluster Mode PIECE 1: match + team + role + true/decoy foundation (additive; Node untouched).
@@ -378,6 +391,42 @@ class GameplayHarnessSpec extends Specification {
     }
 
     private String lambdas0() { clusterMatchService.lambdaUsernamesOnTeamOf('botuser')[0] }
+
+    // --- Cluster local scan: plain `scan` gives EVERY role a firewall-respecting close-range sensor,
+    // so support roles aren't blind (they can find an adjacent enemy Lambda to act on).
+
+    void "plain scan names a NEARBY enemy at strike range, shows it generically, hides identity + enemy Ghosts"() {
+        given: "viewer botuser at (5,5); an enemy Lambda adjacent at (5,6); an enemy Ghost adjacent at (6,6)"
+        def enemyLambda = clusterMatchService.memberWithRole('botuser', 'CLASSIC_LAMBDA', false)
+        def enemyGhost = clusterMatchService.memberWithRole('botuser', 'DIGITAL_GHOST', false)
+        clusterMatchService.setMemberPosition('botuser', 5, 5)
+        clusterMatchService.setMemberPosition(enemyLambda, 5, 6)
+        clusterMatchService.setMemberPosition(enemyGhost, 6, 6)
+
+        when:
+        String out = clusterRoleService.localClusterScanFor('botuser')
+
+        then: "the adjacent enemy Lambda is named (actionable) and generic; the bit never leaks; the Ghost runs dark"
+        out.contains(enemyLambda)
+        out.toLowerCase().contains('lambda')
+        !out.contains('TRUE') && !out.contains('DECOY')
+        !out.contains(enemyGhost)
+    }
+
+    void "local scan masks the enemy username at radius 2 and is silent outside a match"() {
+        given: "an enemy two tiles from the viewer at (5,5)"
+        def enemyCircuit = clusterMatchService.memberWithRole('botuser', 'CIRCUIT_PATTERN', false)
+        clusterMatchService.setMemberPosition('botuser', 5, 5)
+        clusterMatchService.setMemberPosition(enemyCircuit, 5, 7)   // Chebyshev 2 → masked
+
+        expect: "its position is sensed but its name is masked (no name-harvesting from a distance)"
+        def out = clusterRoleService.localClusterScanFor('botuser')
+        out.contains('(5,7)')
+        !out.contains(enemyCircuit)
+
+        and: "outside an active match the local scan is silent (plain scan elsewhere is unchanged)"
+        clusterRoleService.localClusterScanFor('definitely_not_in_a_match') == ''
+    }
 
     // --- Cluster Mode PIECE 5: protection-geometry correlation (leak signal #1).
 

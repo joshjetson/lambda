@@ -64,7 +64,8 @@ class ClusterRoleService {
 
         // Firewall applied here (the firewall owner): Ghosts are invisible to tracking; role-class is
         // shown; the true/decoy bit is never present in the facts, so a Lambda reads generically.
-        def visible = clusterMatchService.enemyRosterFacts(username).findAll { it.role != 'DIGITAL_GHOST' }
+        // enemyRosterFacts is enemy-only → every entry is sameTeam=false for the stealth rule.
+        def visible = clusterMatchService.enemyRosterFacts(username).findAll { isTrackable(false, it.role) }
         def box = new BoxBuilder(ClusterMatchService.PANEL_WIDTH)
             .addCenteredLine(TerminalFormatter.formatText("⊹ TRACKER SWEEP", 'bold', 'cyan'))
             .addSeparator()
@@ -81,6 +82,40 @@ class ClusterRoleService {
             .addLine("  Ghosts run dark. Λ identity is hidden —")
             .addLine("  deduce it from the geometry.")
         return box.build() + "\r\n"
+    }
+
+    /**
+     * The one home for the "Ghosts run dark" stealth rule: an ENEMY Ghost is invisible to every sensor
+     * (the Tracker's board sweep AND the local scan). A teammate's own Ghost stays visible to its team.
+     * Both scanAllFor and localClusterScanFor route through this so the rule can never drift between them.
+     */
+    private static boolean isTrackable(boolean sameTeam, String role) {
+        !(!sameTeam && role == 'DIGITAL_GHOST')
+    }
+
+    private static final int LOCAL_SCAN_RADIUS = 2
+
+    /**
+     * Plain-`scan` local sensor for ANY cluster member (so support roles aren't blind — they can find an
+     * adjacent enemy Lambda to `siphon`/`lock`). Nearby members within Chebyshev LOCAL_SCAN_RADIUS, with
+     * the firewall enforced: role-class comes through firewallViewOf (the true/decoy bit NEVER reaches the
+     * string). The enemy USERNAME — the handle the verbs resolve by — is shown only at strike range (<=1);
+     * at radius 2 it is masked, so names can't be harvested from a distance. Enemy Ghosts run dark.
+     * Returns '' outside an active match, so plain scan elsewhere is unchanged.
+     */
+    String localClusterScanFor(String username) {
+        def visible = clusterMatchService.localMemberFactsFor(username, LOCAL_SCAN_RADIUS).findAll {
+            isTrackable(it.sameTeam, it.role)
+        }
+        if (!visible) return ''
+        def sb = new StringBuilder("\r\n" + TerminalFormatter.formatText("Nearby cluster entities:", 'bold', 'cyan') + "\r\n")
+        visible.each { f ->
+            String roleClass = firewallViewOf(username, f.username)?.role ?: ClusterMatchService.roleLabel(f.role as String)
+            String handle = (f.distance <= 1) ? f.username : '??? (close in to ID)'
+            String tag = f.sameTeam ? 'ally ' : 'ENEMY'
+            sb.append("  (${f.x},${f.y})  ${tag}  ${roleClass}  ${handle}\r\n")
+        }
+        return sb.toString()
     }
 
     // PIECE 5 — leak signal #1 (protection geometry): for each enemy Λ, how many enemy allies are
