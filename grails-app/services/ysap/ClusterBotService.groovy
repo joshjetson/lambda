@@ -116,14 +116,11 @@ class ClusterBotService {
         } catch (Exception ignored) { }
     }
 
-    /** Spread each bot to a spawn tile (seeded → deterministic): ALPHA low quadrant, BETA high. */
+    /** Everyone starts at the origin (0,0) and fans out via the movement tick (the canonical rule).
+     *  Safety net: re-seats any bot that somehow lacks a position back to (0,0). */
     void assignSpawnPositions(String matchId) {
-        def rnd = new Random(matchId.hashCode())
         clusterMatchService.botFactsForMatch(matchId).findAll { it.isBot }.each { f ->
-            int baseX = (f.team == 'ALPHA') ? 0 : 5
-            int baseY = (f.team == 'ALPHA') ? 0 : 5
-            clusterMatchService.setMemberPosition(f.username,
-                Math.min(9, baseX + rnd.nextInt(5)), Math.min(9, baseY + rnd.nextInt(5)))
+            clusterMatchService.setMemberPosition(f.username, 0, 0)
         }
     }
 

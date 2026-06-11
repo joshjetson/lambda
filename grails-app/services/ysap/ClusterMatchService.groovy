@@ -337,6 +337,17 @@ class ClusterMatchService {
             match.save(failOnError: true)
             placeSymbols(match.matchId)   // seed the 4 elemental symbols on the board to race for
 
+            // Canonical rule: EVERY entity (both teams, bots + humans) starts at the origin (0,0) and
+            // fans out from there. Seed each membership; for human seats also reset the LambdaPlayer so
+            // the HUD prompt and dice movement agree (else the (0,0) seed is overwritten on first move).
+            match.teams.each { t -> t.members.each { mem ->
+                mem.positionX = 0; mem.positionY = 0; mem.save(failOnError: true)
+                if (!mem.isBot) {
+                    def lp = LambdaPlayer.findByUsername(mem.username)
+                    if (lp) { lp.positionX = 0; lp.positionY = 0; lp.save(failOnError: true) }
+                }
+            } }
+
             result = renderMembershipPanel(m, 'Match Started — ACTIVE')
         }
         return result

@@ -339,6 +339,12 @@ class GameplayHarnessSpec extends Specification {
         and: "an ACTIVE status now shows the race scoreboard (support roles can read the race too)"
         def active = bot.command('cluster status').toLowerCase()
         active.contains('cluster race') && active =~ /\d\/4/
+
+        and: "EVERY entity starts at the origin (0,0) — the human seat included"
+        def me = clusterMatchService.memberPositionOf('botuser')
+        me.x == 0 && me.y == 0
+        def mid = clusterMatchService.clusterStateFor('botuser').matchId
+        clusterMatchService.botFactsForMatch(mid).every { it.x == 0 && it.y == 0 }
     }
 
     // --- Cluster Mode PIECE 3: enemy-view identity firewall.
@@ -569,7 +575,7 @@ class GameplayHarnessSpec extends Specification {
 
     // --- Cluster bots PIECE 1: spawn positions + deterministic escort-movement tick.
 
-    void "cluster bots receive in-bounds spawn positions"() {
+    void "cluster bots all spawn at the origin (0,0) — everyone starts there and fans out"() {
         given:
         def matchId = clusterMatchService.clusterStateFor('botuser').matchId
         clusterBotService.assignSpawnPositions(matchId)
@@ -577,7 +583,7 @@ class GameplayHarnessSpec extends Specification {
         expect:
         def bots = clusterMatchService.botFactsForMatch(matchId).findAll { it.isBot }
         bots.size() > 0
-        bots.every { it.x != null && it.y != null && it.x in 0..9 && it.y in 0..9 }
+        bots.every { it.x == 0 && it.y == 0 }
     }
 
     void "advanceBots walks an escort one step toward its Lambda each tick (deterministic, in-bounds)"() {
