@@ -419,4 +419,20 @@ class GameplayHarnessSpec extends Specification {
         !clusterMatchService.occupancyCheck(alphaCurrent, 7, 7).allowed
         clusterMatchService.occupancyCheck(alphaGeo, 7, 7).allowed
     }
+
+    // --- Cluster Mode PIECE 7: item-flow leak signal #2 — the public heap coexists with a match.
+    // No new economy: the heap already broadcasts trades/payments to everyone (enemies included), so
+    // goods/bits flowing toward a Lambda are observable. This confirms the substrate is reachable
+    // from inside an active cluster match (the hybrid: social/economy stays live while you play).
+
+    void "the public heap economy is reachable from inside an active cluster match"() {
+        when: "a cluster member enters the heap"
+        String heapOut = bot.command('heap')
+
+        then: "the heap is usable during a match — public trades/payments here are leak signal #2"
+        heapOut.toLowerCase() =~ /heap|echo|mingle|chat/
+
+        cleanup:
+        bot.command('exit')
+    }
 }
