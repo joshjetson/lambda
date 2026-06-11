@@ -269,6 +269,9 @@ class GameplayHarnessSpec extends Specification {
         then:
         out.toLowerCase() =~ /team|alpha|beta/
         out.toLowerCase() =~ /collector|lambda/   // role derived from avatarSilhouette CLASSIC_LAMBDA
+
+        and: "the panel self-explains the role's ability (intuitiveness — the player learns their command)"
+        out.toLowerCase() =~ /invoke|symbols/     // CLASSIC_LAMBDA ability hint
     }
 
     void "with two Lambdas, exactly one is the true Lambda and each entity sees only its own bit"() {
@@ -674,6 +677,12 @@ class GameplayHarnessSpec extends Specification {
         def enemyBinary = clusterMatchService.memberWithRole('botuser', 'BINARY_FORM', false)
         clusterMatchService.setMemberPosition(enemyBinary, 5, 6)
         clusterRoleService.siphonFromFor(alphaGhost, enemyBinary).toLowerCase().contains('no siphonable')
+
+        and: "siphoning a TEAMMATE Lambda is refused — enemy-only, no self-sabotage"
+        clusterRoleService.clearSiphonCooldowns()
+        clusterMatchService.setMemberPosition('botuser', 5, 5)   // botuser is ALPHA — same team as alphaGhost
+        clusterMatchService.setMemberPosition(alphaGhost, 5, 5)
+        clusterRoleService.siphonFromFor(alphaGhost, 'botuser').toLowerCase().contains('your team')
     }
 
     void "a bot Saboteur siphons a held symbol off an adjacent human Lambda (scheduler-only pass)"() {

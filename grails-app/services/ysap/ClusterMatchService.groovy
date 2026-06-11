@@ -37,6 +37,20 @@ class ClusterMatchService {
     /** Single source of the role-name mapping (used by the panel renderer AND the firewall). */
     static String roleLabel(String role) { ROLE_LABEL[role] ?: role }
 
+    // Player-facing "what command does my role give me" — surfaced on the status panel so a role is
+    // self-explaining (the design's intuitiveness bar). One source, mirrors ROLE_LABEL.
+    // Concise enough to fit the 50-wide panel (indented, no border overflow → HUD-safe).
+    private static final Map<String, String> ROLE_ABILITY = [
+        'CLASSIC_LAMBDA' : "Gather 4 symbols, then 'invoke' to win",
+        'CIRCUIT_PATTERN': "'scan all' reveals enemy positions",
+        'GEOMETRIC_ENTITY': "Passive: squeeze full tiles, trap-immune",
+        'FLOWING_CURRENT': "'lock <enemy>' freezes them for 60s",
+        'DIGITAL_GHOST'  : "'siphon <enemy>' steals a symbol; 'spam'",
+        'BINARY_FORM'    : "'deploy bot <x> <y>' guards a tile"
+    ].asImmutable()
+
+    static String roleAbility(String role) { ROLE_ABILITY[role] ?: '' }
+
     // In-memory immobilize state (Current's `lock`). Keyed by username → lock expiry millis.
     private final Map<String, Long> lockUntil = new ConcurrentHashMap<>()
 
@@ -402,6 +416,7 @@ class ClusterMatchService {
             .addLine("  Match: ${match.matchId}")
             .addLine("  State: ${match.state}   Team: ${team.name}")
             .addLine("  Role:  ${roleLabel(m.role)}")
+            .addLine("  ${TerminalFormatter.formatText(roleAbility(m.role), 'italic', 'cyan')}")
 
         if (m.role == 'CLASSIC_LAMBDA') {
             def lambdas = team.members.findAll { it.role == 'CLASSIC_LAMBDA' }

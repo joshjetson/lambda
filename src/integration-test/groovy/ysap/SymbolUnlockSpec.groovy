@@ -29,6 +29,9 @@ class SymbolUnlockSpec extends Specification {
     }
 
     private ElementalSymbol placeSymbol(String type, int level, int x, int y) {
+        // Boot placement randomly seeds symbols across the map; clear this tile so the test's symbol is
+        // the SOLE occupant (else the service may acquire the boot symbol and leave ours hidden → flake).
+        ElementalSymbol.findAllByMatrixLevelAndPositionXAndPositionY(level, x, y).each { it.delete(failOnError: true) }
         new ElementalSymbol(symbolType: type, symbolIcon: '🜄', symbolName: "${type} symbol",
                 description: 'a hidden elemental force', matrixLevel: level, positionX: x, positionY: y,
                 isHidden: true).save(failOnError: true)

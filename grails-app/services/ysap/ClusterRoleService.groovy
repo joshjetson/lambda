@@ -198,6 +198,10 @@ class ClusterRoleService {
         def gate = verbGate(casterUsername, 'DIGITAL_GHOST', "'siphon' is the Ghost (Saboteur) team ability.", targetName)
         if (gate.fail) return gate.msg
         String target = gate.target
+        // Enemy-only: siphon DENIES the opposing Lambda. Stripping a teammate would be self-sabotage.
+        if (clusterMatchService.clusterStateFor(target)?.team == clusterMatchService.clusterStateFor(casterUsername)?.team) {
+            return warn("Siphon targets ENEMIES — ${target} is on your team.")
+        }
         if (!siphonReady(casterUsername)) {
             long wait = ((SIPHON_COOLDOWN_MS - (System.currentTimeMillis() - lastSiphonAt[casterUsername])) / 1000) + 1
             return TerminalFormatter.formatText("Siphon coil recharging — ${wait as int}s.", 'italic', 'cyan') + "\r\n"
