@@ -83,7 +83,11 @@ class TelnetServerService {
                 chatService.enterChat(player, writer)
             },
             'cluster': { player, command, parts, writer ->
-                clusterMatchService.handleClusterCommand(command, player, writer)
+                def out = clusterMatchService.handleClusterCommand(command, player, writer)
+                // On a successful start, brief the OTHER humans in the match (joiners) — they didn't run
+                // 'start' and would otherwise never learn it began. No-op in solo / on a failed start.
+                if (parts.length > 1 && parts[1].toLowerCase() == 'start') clusterRoleService.notifyMatchStarted(player.username)
+                out
             },
             'lock': { player, command, parts, writer ->
                 clusterRoleService.lockTarget(player, parts.length > 1 ? parts[1] : '') ?: TerminalFormatter.formatText("'lock' is a Cluster Mode (Current) ability.", 'italic', 'cyan') + "\r\n"

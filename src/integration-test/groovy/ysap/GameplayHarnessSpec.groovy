@@ -345,6 +345,11 @@ class GameplayHarnessSpec extends Specification {
         me.x == 0 && me.y == 0
         def mid = clusterMatchService.clusterStateFor('botuser').matchId
         clusterMatchService.botFactsForMatch(mid).every { it.x == 0 && it.y == 0 }
+
+        and: "human-member lookup excludes bots, and briefing the other humans is a safe no-op"
+        def humans = clusterMatchService.humanMembersOfMatch('botuser')
+        humans.contains('botuser') && humans.every { !it.startsWith('bot_') }
+        clusterRoleService.notifyMatchStarted('botuser') == null   // pushes to joiners; must not throw
     }
 
     // --- Cluster Mode PIECE 3: enemy-view identity firewall.

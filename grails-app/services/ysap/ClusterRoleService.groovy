@@ -225,6 +225,23 @@ class ClusterRoleService {
     }
 
     /**
+     * On `cluster start`, push every OTHER human in the match their role briefing — the joiners who
+     * didn't run 'start' otherwise never learn the match began or what they are. Solo (only the starter
+     * is human) is a no-op. Idempotent-safe: only ACTIVE members are messaged.
+     */
+    void notifyMatchStarted(String starterUsername) {
+        clusterMatchService.humanMembersOfMatch(starterUsername).each { username ->
+            if (username == starterUsername) return
+            def view = clusterMatchService.clusterStateFor(username)
+            if (!view || view.state != 'ACTIVE') return
+            pushTo(username, "\r\n" +
+                TerminalFormatter.formatText("⬡ Your cluster match STARTED — you are ${ClusterMatchService.roleLabel(view.role)}.", 'bold', 'cyan') + "\r\n" +
+                TerminalFormatter.formatText("  ${ClusterMatchService.roleAbility(view.role)}", 'italic', 'cyan') + "\r\n" +
+                "  Everyone starts at (0,0) — 'cluster status' for the board, 'dados' to roll & move.\r\n")
+        }
+    }
+
+    /**
      * Ghost's `siphon <target>`: the Saboteur's real teeth — strip one symbol off an adjacent ENEMY
      * Lambda and scatter it back to the matrix (denial). The referee mutation is identity-blind, so
      * siphoning the decoy succeeds identically (the bluff working = you "wasted" it). Cooldown-gated.

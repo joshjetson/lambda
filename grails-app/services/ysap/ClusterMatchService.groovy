@@ -556,6 +556,16 @@ class ClusterMatchService {
         return out.sort { it.distance }
     }
 
+    /** Usernames of the human (non-bot) members in the player's match — for start/lobby notifications. */
+    List<String> humanMembersOfMatch(String username) {
+        List<String> out = []
+        ClusterMatch.withTransaction {
+            def m = findActiveMembership(username)
+            if (m) out = m.team.match.teams.collectMany { it.members }.findAll { !it.isBot }.collect { it.username }
+        }
+        return out
+    }
+
     /** A member username with `role` on the player's team (sameTeam=true) or the enemy team. Seam. */
     String memberWithRole(String username, String role, boolean sameTeam) {
         String out = null
