@@ -96,6 +96,23 @@ class DiceMoveSpec extends Specification {
         !coordinateStateService.turnStateFor(p.username).xUsed
     }
 
+    void "moving into the matrix boundary is rejected without burning the axis"() {
+        given: "a player at the origin (0,0) — west and south are walls"
+        def p = playerAt00('DiceEdge')
+        coordinateStateService.handleDadosCommand(p, dummyWriter())
+
+        when: "they try to move west, off the X=0 edge (a no-op clamp)"
+        def out = coordinateStateService.handleMoveCommand('move west 1', p, dummyWriter())
+
+        then: "it's rejected with an edge message and the X axis is still available (not silently burned)"
+        out.toLowerCase().contains('edge')
+        !coordinateStateService.turnStateFor(p.username).xUsed
+
+        and: "the freed X budget can still be spent moving the other way (east, into the safe zone)"
+        coordinateStateService.handleMoveCommand('move east 1', p, dummyWriter())
+        LambdaPlayer.get(p.id).positionX == 1
+    }
+
     void "movementRangeBonus adds to each axis only while the recursion window is active"() {
         given: "a player with an active recurse-movement effect (+2 range)"
         def p = playerAt00('DiceBonus')

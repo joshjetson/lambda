@@ -577,6 +577,13 @@ class CoordinateStateService {
         int newX = Math.max(0, Math.min(9, player.positionX + delta[0] * count))
         int newY = Math.max(0, Math.min(9, player.positionY + delta[1] * count))
 
+        // Boundary no-op: already at the edge for this direction, so nothing would actually move. Don't
+        // silently burn the axis (the confusing "moved" with unchanged coords) — say so and let the
+        // player spend that budget elsewhere this roll.
+        if (newX == player.positionX && newY == player.positionY) {
+            return TerminalFormatter.formatText("You're at the ${dir} edge of the matrix (0-9) — that way is blocked. Spend your ${axis} budget another direction.", 'bold', 'yellow') + "\r\n"
+        }
+
         // Lock the axis (forfeit any remainder); when both axes are spent the turn completes.
         if (axis == 'Y') state.yUsed = true else state.xUsed = true
         if (state.yUsed && state.xUsed) {
