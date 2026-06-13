@@ -31,7 +31,10 @@ class SimpleRepairService {
         String repairCode
         List<Integer> lockedDigits = []
         Integer currentSlot = 0
-        Map<Integer, Integer> cyclingValues = [:]  // NEW
+        // Concurrent: the DigitCycler scheduler thread writes this every ~300ms while the telnet/render
+        // thread reads it (getCurrentDisplay / repairPanelLines) and removes a key on lock. Plain HashMap
+        // here is a real data race.
+        Map<Integer, Integer> cyclingValues = new ConcurrentHashMap<>()
         Boolean isActive = true
         PrintWriter playerWriter
         ScheduledFuture<?> cyclingTask
@@ -92,10 +95,10 @@ class SimpleRepairService {
                 targetX: targetX,
                 targetY: targetY,
                 repairCode: repairCode,
-                playerWriter: playerWriter,
-                cyclingValues: [(0): new Random().nextInt(10)]
+                playerWriter: playerWriter
         )
-        
+        session.cyclingValues[0] = new Random().nextInt(10)   // seed slot 0 (field is a ConcurrentHashMap)
+
         activeSessions[player.username] = session
         
         // Start cycling first slot
@@ -223,6 +226,43 @@ class SimpleRepairService {
 
 
 
+
+    /**
+     * Fixed, plain-ASCII panel lines for the HUD repair display, built from LIVE session state so the
+     * spinning digit (read fresh each render) animates IN PLACE — no scrolling history. The YOURS row
+     * comes straight from getCurrentDisplay() (the single source: locked + spinning + dashes); we only
+     * add a caret marking the active slot. ASCII only — the HUD screen buffer is one glyph per cell, so
+     * emoji/ANSI would desync the grid. Returns null when there's no active session.
+     */
+    List<String> repairPanelLines(String playerUsername) {
+        def s = activeSessions[playerUsername]
+        if (!s || !s.isActive) return null
+        int n = s.repairCode.length()
+        def cells = s.getCurrentDisplay().split(' ')   // e.g. "2 8 -" → ["2","8","-"]
+        def target = new StringBuilder("  CODE  ")
+        def yours  = new StringBuilder("  YOU   ")
+        def caret  = new StringBuilder("        ")
+        for (int i = 0; i < n; i++) {
+            target.append(String.format("%3s", s.repairCode.charAt(i) as String))
+            yours.append(String.format("%3s", i < cells.length ? cells[i] : "-"))
+            caret.append(i == s.currentSlot ? "  ^" : "   ")
+        }
+        int slot = Math.min(s.currentSlot + 1, n)
+        return [
+            "",
+            "  >> SECTOR REPAIR <<",
+            "  Coordinate (${s.targetX},${s.targetY})".toString(),
+            "  ----------------------",
+            target.toString(),
+            yours.toString(),
+            caret.toString() + " spinning",
+            "",
+            "  Slot ${slot} of ${n} - match the code".toString(),
+            "",
+            "  [ENTER] lock the spinning digit",
+            "  [exit]  abort repair"
+        ]
+    }
 
     def isPlayerInRepairSession(String playerUsername) {
         def session = activeSessions[playerUsername]
