@@ -870,9 +870,20 @@ class HudService {
             // Any other input = lock the spinning digit.
             def enterResult = simpleRepairService.handleSpaceBarPress(playerId)
 
-            // Game over (all slots locked) → leave repair mode and show the SUCCESS/FAIL result box.
+            // Game over (all slots locked) → leave repair mode and show a PLAIN outcome line. (The
+            // service's BoxBuilder result box uses ╔═╗ box-drawing + emoji, which corrupt the HUD grid;
+            // a plain string renders cleanly in the left command area.)
             if (!enterResult.continueGame || !simpleRepairService.isPlayerInRepairSession(playerId)) {
-                exitRepairTo(outputStream, player, 'repair', (enterResult.message ?: "Repair complete.") as String)
+                String msg = (enterResult.message ?: '').toString().toUpperCase()
+                String outcome
+                if (enterResult.gameWon) {
+                    outcome = "REPAIR SUCCESSFUL - coordinate restored, bits awarded."
+                } else if (msg.contains('PRE-EMPTED')) {
+                    outcome = "Repair pre-empted - another entity finished it first. No prize."
+                } else {
+                    outcome = "REPAIR FAILED - sequence mismatch. Type 'repair <x> <y>' to retry."
+                }
+                exitRepairTo(outputStream, player, 'repair', outcome)
                 return "CONTINUE_HUD_MODE"
             }
 

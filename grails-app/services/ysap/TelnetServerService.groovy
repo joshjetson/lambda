@@ -559,8 +559,12 @@ class TelnetServerService {
                     if (line?.trim() && !line.trim().equalsIgnoreCase("quit")) {
                         lambdaPlayerService.saveCommandToHistory(player, line.trim())
                     }
-                    // Check for repair mini-game commands
-                    if (simpleRepairService.isPlayerInRepairSession(player.username)) {
+                    // Check for repair mini-game commands. HUD players are EXCLUDED here — their repair
+                    // input is handled inside processHudCommand (handleActiveRepairSession), which renders
+                    // into the frame. Without this guard the classic handler ALSO ran for HUD players,
+                    // double-locking digits and printing the result box straight to the socket (corrupting
+                    // the HUD frame).
+                    if (!hudModeSessions.contains(writer) && simpleRepairService.isPlayerInRepairSession(player.username)) {
                             def command = line.trim()
                             def messageBuilder = new StringBuilder()
 
