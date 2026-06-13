@@ -877,17 +877,6 @@ class TelnetServerService {
             return "QUIT:" + TerminalFormatter.formatText("Lambda entity disconnecting (state saved)...\r\n", 'italic', 'yellow')
         }
 
-        // Check if player is in an active defrag encounter
-        if (activeDefragSessions.containsKey(writer)) {
-            def defragBot = activeDefragSessions[writer]
-            def result = defragBotService.handleDefragEncounter(command, player, writer, defragBot)
-            // If encounter is completed, remove from active sessions
-            if (defragBot && !defragBot.isActive) {
-                activeDefragSessions.remove(writer)
-            }
-            return result
-        }
-
         // Refresh player state and check if player is in mingle mode
         // Note: isInMingle is really is in chat
         def isInMingle = false
@@ -909,11 +898,30 @@ class TelnetServerService {
     }
 
     /**
+     * If this player is mid-defrag-encounter, route the command into it (cat/grep/kill flow) and return
+     * the response; otherwise null. Single owner of activeDefragSessions — called from dispatchCommand so
+     * classic AND HUD get the multi-turn routing from one place (no per-mode duplication).
+     */
+    String routeActiveDefrag(String command, LambdaPlayer player, PrintWriter writer) {
+        if (!activeDefragSessions.containsKey(writer)) return null
+        def defragBot = activeDefragSessions[writer]
+        def result = defragBotService.handleDefragEncounter(command, player, writer, defragBot)
+        if (defragBot && !defragBot.isActive) activeDefragSessions.remove(writer)   // encounter over → clear
+        return result
+    }
+
+    /**
      * The shared command-map dispatch: O(1) lookup in `commandHandlers` + delegate, with the
      * unknown-command fallback. Extracted so HUD mode reuses the exact same dispatch (Phase 9)
      * instead of duplicating a subset in its own switch.
      */
     String dispatchCommand(String command, LambdaPlayer player, PrintWriter writer) {
+        // An active defrag encounter (cat/grep/kill) owns the next commands. Checked HERE — the one path
+        // BOTH classic and HUD reach — so defrag combat works identically in HUD (it shares this dispatch
+        // and a stable per-session writer). Returns null when there's no encounter → normal dispatch.
+        def defragTurn = routeActiveDefrag(command, player, writer)
+        if (defragTurn != null) return defragTurn
+
         def parts = command.trim().toLowerCase().split(' ')
         def cmd = parts[0]
 

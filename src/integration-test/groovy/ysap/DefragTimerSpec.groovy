@@ -24,6 +24,9 @@ class DefragTimerSpec extends Specification {
     @Autowired
     SpecialItemService specialItemService
 
+    @Autowired
+    TelnetServerService telnetServerService
+
     private Long createPlayerAt(String username, int level, int x, int y, int bits) {
         Long id = null
         LambdaPlayer.withTransaction {
@@ -69,6 +72,40 @@ class DefragTimerSpec extends Specification {
         DefragBot.withTransaction {
             assert !DefragBot.get(botId).isActive
             true
+        }
+    }
+
+    void "an active defrag encounter routes through the shared dispatch — HUD inherits combat parity"() {
+        given: "a player and a live bot registered as an active encounter under a (HUD-style) writer"
+        Long playerId = createPlayerAt('defrag_dispatch', 1, 3, 3, 0)
+        Long botId = spawnBotAt(1, 3, 3)
+        def w = new PrintWriter(new StringWriter())
+        def pid = DefragBot.withTransaction { DefragBot.get(botId).processId }
+        DefragBot.withTransaction { telnetServerService.activeDefragSessions[w] = DefragBot.get(botId) }
+
+        expect: "cat routes into the encounter via the shared check (non-null = HUD reuses this path)"
+        LambdaPlayer.withTransaction {
+            telnetServerService.routeActiveDefrag("cat /proc/defrag/${DefragBot.get(botId).botId}".toString(), LambdaPlayer.get(playerId), w) != null
+        }
+
+        and: "grep -o isolates the PID (acquires it) through dispatchCommand"
+        LambdaPlayer.withTransaction {
+            telnetServerService.dispatchCommand("grep -o ${pid}".toString(), LambdaPlayer.get(playerId), w).toLowerCase().contains('acquired')
+        }
+
+        when: "the player kills the process via dispatchCommand — the one path classic AND HUD both use"
+        String out = LambdaPlayer.withTransaction {
+            telnetServerService.dispatchCommand("kill -9 ${pid}".toString(), LambdaPlayer.get(playerId), w)
+        }
+
+        then: "the bot is terminated and the encounter is cleared from the shared session map"
+        out.toLowerCase().contains('terminated') || out.toLowerCase().contains('defrag bot')
+        DefragBot.withTransaction { !DefragBot.get(botId).isActive }
+        !telnetServerService.activeDefragSessions.containsKey(w)
+
+        and: "with no active encounter the router is a no-op, so normal dispatch proceeds"
+        LambdaPlayer.withTransaction {
+            telnetServerService.routeActiveDefrag('status', LambdaPlayer.get(playerId), new PrintWriter(new StringWriter())) == null
         }
     }
 

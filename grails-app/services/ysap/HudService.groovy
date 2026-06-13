@@ -701,10 +701,10 @@ class HudService {
         'ls':     { String c, LambdaPlayer p -> hudLs(p) },
         'help':   { String c, LambdaPlayer p -> hudHelp(c) },
         'heap':   { String c, LambdaPlayer p -> hudHeap(p) },
-        'mingle': { String c, LambdaPlayer p -> hudHeap(p) },
-        // defrag combat needs the classic activeDefragSessions loop the HUD path can't service —
-        // do NOT delegate (would leak an orphaned session); tell the player to switch to classic.
-        'defrag': { String c, LambdaPlayer p -> TerminalFormatter.formatText("Defrag combat is not available in HUD mode — type 'normal' to switch to classic.", 'bold', 'yellow') }
+        'mingle': { String c, LambdaPlayer p -> hudHeap(p) }
+        // defrag is intentionally NOT overridden — it flows through dispatchCommand like any command, and
+        // the encounter's cat/grep/kill turns route via routeActiveDefrag (shared, keyed by the stable
+        // HUD writer), so defrag combat works in HUD with zero HUD-specific code.
     ]
 
     private String processGameCommandForHud(String command, LambdaPlayer player) {
