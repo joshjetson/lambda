@@ -148,18 +148,81 @@ class LambdaMerchantService {
         // Randomly select 2-3 special items
         def selectedSpecialCount = 2 + (Math.random() * 2).toInteger()
         inventory.specialItems = specialItems.shuffled().take(selectedSpecialCount)
-        
+
+        markUniqueByRarity(inventory)
         return new JsonBuilder(inventory).toString()
     }
+
+    /**
+     * Tier the freshly-built inventory: rare/epic items become UNIQUE (global first-come-first-served —
+     * once any player buys one it's gone for everyone here), everything else stays common (per-player).
+     * This is what makes "the first player to reach the merchant gets it, and only that player" real for
+     * the high-value stock while bread-and-butter fragments stay broadly available.
+     */
+    private void markUniqueByRarity(Map inventory) {
+        inventory.fragments?.each { if ((it.rarity as String)?.toLowerCase() in ['rare', 'epic']) it.unique = true }
+        inventory.specialItems?.each { if (getItemRarity(it.name as String) in ['RARE', 'EPIC']) it.unique = true }
+    }
     
+    /**
+     * The ONE ordered list of items this player can currently buy here — fragments first, then special
+     * items, matching the historical display/`buy <n>` numbering contract. Both generateShopDisplay and
+     * handlePurchase resolve against THIS list, so the index a player sees always maps to the item they get
+     * (filtering can never desync the numbering). Hides common items this player already bought; unique
+     * items that have been bought are already physically gone from `inventory`, so no extra filter needed.
+     * Each entry: [name, price, description, unique, kind:'fragment'|'special'].
+     */
+    private List<Map> visibleItemsFor(LambdaMerchant merchant, LambdaPlayer player) {
+        // Re-read the live row, not the passed (possibly stale) object — a purchase earlier this turn may
+        // have removed a unique item or recorded a common one. This keeps the display, the `buy <n>` index
+        // resolution, and the just-committed stock state in agreement.
+        def invJson = merchant.inventory
+        def ppJson = merchant.playerPurchases
+        LambdaMerchant.withTransaction {
+            def m = LambdaMerchant.get(merchant.id)
+            if (m != null) { invJson = m.inventory; ppJson = m.playerPurchases }
+        }
+
+        def inventory
+        try {
+            inventory = new JsonSlurper().parseText(invJson)
+        } catch (Exception ignored) {
+            return []
+        }
+        def fragments = (inventory?.fragments instanceof List) ? inventory.fragments : []
+        def specialItems = (inventory?.specialItems instanceof List) ? inventory.specialItems : []
+
+        def purchased = []
+        try {
+            def pp = new JsonSlurper().parseText(ppJson ?: '{}')
+            purchased = (pp[player.id.toString()] ?: []) as List
+        } catch (Exception ignored) { }
+
+        def visible = []
+        fragments.findAll { it?.name && !(it.name in purchased) }.each {
+            visible << [name: it.name, price: it.price, description: it.description ?: '',
+                        unique: (it.unique ?: false), kind: 'fragment']
+        }
+        specialItems.findAll { it?.name && !(it.name in purchased) }.each {
+            visible << [name: it.name, price: it.price, description: it.description ?: '',
+                        unique: (it.unique ?: false), kind: 'special']
+        }
+        return visible
+    }
+
     private String generateShopDisplay(LambdaMerchant merchant, LambdaPlayer player) {
-        def jsonSlurper = new JsonSlurper()
-        def inventory = jsonSlurper.parseText(merchant.inventory)
-        
-        // Refresh player to get current bits amount
-        def currentPlayer = LambdaPlayer.get(player.id)
-        def currentBits = currentPlayer?.bits ?: player.bits
-        
+        // Telnet-thread read of the live bits — wrap in a transaction per the codebase rule.
+        def currentBits = player.bits
+        LambdaPlayer.withTransaction {
+            def currentPlayer = LambdaPlayer.get(player.id)
+            if (currentPlayer != null) currentBits = currentPlayer.bits
+        }
+
+        // The visible list already hides this player's common purchases and any globally-bought uniques,
+        // and is ordered fragments-then-specials — so the number printed here is exactly the number
+        // handlePurchase resolves against. Numbering is continuous across both sections.
+        def visible = visibleItemsFor(merchant, player)
+
         def box = new BoxBuilder(48)  // Width matching the original box
             .addCenteredLine(merchant.merchantName)
             .addCenteredLine("FRAGMENT TRADER")
@@ -168,27 +231,34 @@ class LambdaMerchantService {
             .addSeparator()
             .addCenteredLine("LOGIC FRAGMENTS")
             .addSeparator()
-        
-        // Add fragment items
-        inventory.fragments.eachWithIndex { fragment, index ->
-            def itemLine = " ${(index + 1).toString().padRight(2)} ${fragment.name.padRight(25)} ${fragment.price.toString().padLeft(6)} bits"
-            box.addLine(itemLine)
+
+        boolean anyFragment = false
+        boolean anySpecial = false
+        visible.eachWithIndex { item, index ->
+            if (item.kind == 'fragment') {
+                anyFragment = true
+                def tag = item.unique ? " (unique)" : ""
+                box.addLine(" ${(index + 1).toString().padRight(2)} ${item.name.padRight(25)} ${item.price.toString().padLeft(6)} bits${tag}")
+            }
         }
-        
+        if (!anyFragment) box.addLine(" (sold out)")
+
         box.addSeparator()
             .addCenteredLine("SPECIAL ITEMS")
             .addSeparator()
-        
-        // Add special items
-        inventory.specialItems.eachWithIndex { item, index ->
-            def itemNum = index + inventory.fragments.size() + 1
-            def itemLine = " ${itemNum.toString().padRight(2)} ${item.name.padRight(25)} ${item.price.toString().padLeft(6)} bits"
-            box.addLine(itemLine)
+
+        visible.eachWithIndex { item, index ->
+            if (item.kind == 'special') {
+                anySpecial = true
+                def tag = item.unique ? " (unique)" : ""
+                box.addLine(" ${(index + 1).toString().padRight(2)} ${item.name.padRight(25)} ${item.price.toString().padLeft(6)} bits${tag}")
+            }
         }
-        
+        if (!anySpecial) box.addLine(" (sold out)")
+
         def result = box.build()
         result += "Commands: buy <number> | sell <fragment_name> | exit\r\n"
-        
+
         return result
     }
 
@@ -207,57 +277,108 @@ class LambdaMerchantService {
             return [success: false, output: "Invalid item number: ${parts[1]}"]
         }
 
-        def inventory
-        try {
-            inventory = new JsonSlurper().parseText(merchant.inventory)
-        } catch (Exception e) {
-            return [success: false, output: "Merchant inventory error. Please try again later."]
+        // Resolve against the SAME per-player visible list the player saw in `shop`, so `buy <n>` always
+        // buys the n-th item they were shown — never a raw-inventory index that filtering would desync.
+        def visible = visibleItemsFor(merchant, player)
+        if (itemNumber < 1 || itemNumber > visible.size()) {
+            return [success: false, output: "Item number out of range (1-${visible.size()})"]
         }
 
-        def fragments = inventory?.fragments ?: []
-        def specialItems = inventory?.specialItems ?: []
-
-        if (!(fragments instanceof List) || !(specialItems instanceof List)) {
-            return [success: false, output: "Merchant inventory is corrupted. Please contact support."]
-        }
-
-        def allItems = fragments + specialItems
-
-        if (itemNumber < 1 || itemNumber > allItems.size()) {
-            return [success: false, output: "Item number out of range (1-${allItems.size()})"]
-        }
-
-        def selectedItem = allItems[itemNumber - 1]
+        def selectedItem = visible[itemNumber - 1]
 
         if (!selectedItem?.name || selectedItem?.price == null) {
             return [success: false, output: "Selected item is invalid. Please try a different item."]
         }
 
-        // Check if player has enough bits BEFORE starting transaction
-        def currentPlayer = LambdaPlayer.get(player.id)
-        if (!currentPlayer) {
-            return [success: false, output: "Player not found in database."]
-        }
-        
-        if (currentPlayer.bits < selectedItem.price) {
-            return [success: false, output: "Insufficient bits. Need ${selectedItem.price}, you have ${currentPlayer.bits}"]
+        // The whole purchase — claim, charge, grant, and stock bookkeeping — runs in ONE transaction so it
+        // either fully commits or fully rolls back; a grant failure can never strand a claimed unique item.
+        // The merchant row's optimistic-lock `version` is the race-resolution point: two buyers who both
+        // read the same merchant and both write it (a unique removal, or a playerPurchases append) collide
+        // on commit — one wins, the other throws OptimisticLockingFailureException. We RETRY the loser: on
+        // retry it re-reads the now-current row, so a racer for the LAST unique sees it gone (→ sold out),
+        // while two buyers of (different or common) items each re-read and both succeed. Retry, not a
+        // pessimistic lock, because H2's row lock doesn't reliably block here and the merge-on-reread is
+        // exactly what common-item contention needs (a plain lock-and-overwrite would drop the other write).
+        def outcome = [status: 'ok']   // 'ok' | 'no_player' | 'broke' | 'sold_out'
+        int attempt = 0
+        while (true) {
+            attempt++
+            try {
+                outcome = attemptPurchase(merchant, player, selectedItem)
+                break
+            } catch (org.springframework.dao.OptimisticLockingFailureException ignored) {
+                // A racing buyer committed first; the loser's transaction rolled back (no charge, no grant).
+                // Retry against the now-current row — see the contract in attemptPurchase. Give up after a
+                // few rounds of contention and treat it as having lost the item.
+                if (attempt >= 5) { outcome = [status: 'sold_out']; break }
+            }
         }
 
-        // Perform purchase in a transaction
-        LambdaPlayer.withTransaction {
+        if (outcome.status == 'no_player') return [success: false, output: "Player not found in database."]
+        if (outcome.status == 'broke') return [success: false, output: "Insufficient bits. Need ${selectedItem.price}, you have ${outcome.have}"]
+        if (outcome.status == 'sold_out') return [success: false, output: "⚡ Someone just bought the last ${selectedItem.name}.\r\n", action: "purchase"]
+
+        return [
+                success: true,
+                output : "✅ Purchased ${selectedItem.name} for ${selectedItem.price} bits!\r\n",
+                action : "purchase"
+        ]
+    }
+
+    /**
+     * One atomic attempt at a resolved purchase: claim (unique) / record (common) the stock, charge the
+     * player, and grant the item — ALL in one transaction so it fully commits or fully rolls back (a grant
+     * failure can never strand a claimed unique item). The merchant row's optimistic-lock `version` is the
+     * race-resolution point: two buyers who both read it and both write it (a unique removal, or a
+     * playerPurchases append) collide on commit — one wins, the other throws and is retried by the caller
+     * against the now-current row. Returns an outcome map; throws OptimisticLockingFailureException on a
+     * lost commit race so the caller can retry.
+     */
+    private Map attemptPurchase(LambdaMerchant merchant, LambdaPlayer player, Map selectedItem) {
+        def outcome = [status: 'ok']
+        // REQUIRES_NEW: this service is @Transactional, so a plain withTransaction would JOIN the outer
+        // transaction and defer the commit (and any optimistic-lock failure) to the service boundary —
+        // past the caller's retry catch. A fresh, independent transaction commits HERE, so a version
+        // conflict surfaces inside this call and the caller can retry it.
+        // INVARIANT: the suspended outer transaction must hold NO write lock on this merchant or player row
+        // when we get here (today it only did a read-only visibleItemsFor). If a caller ever writes either
+        // row earlier in the same command, this inner tx would block on a lock the outer tx holds —
+        // self-deadlock until LOCK_TIMEOUT. Keep merchant/player writes out of the pre-purchase path.
+        LambdaPlayer.withTransaction([propagationBehavior: org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW]) {
             def managedPlayer = LambdaPlayer.get(player.id)
-            if (!managedPlayer) {
-                throw new IllegalStateException("Player not found in database.")
+            if (!managedPlayer) { outcome.status = 'no_player'; return }
+            if (managedPlayer.bits < selectedItem.price) { outcome.status = 'broke'; outcome.have = managedPlayer.bits; return }
+
+            def m = LambdaMerchant.get(merchant.id)
+            if (m == null) { outcome.status = 'sold_out'; return }
+            def inv
+            try { inv = new JsonSlurper().parseText(m.inventory) } catch (Exception ignored) { outcome.status = 'sold_out'; return }
+            def frags = (inv?.fragments instanceof List) ? inv.fragments : []
+            def specs = (inv?.specialItems instanceof List) ? inv.specialItems : []
+
+            if (selectedItem.unique) {
+                // Re-check: if a racing buyer already took it, bail with nothing charged.
+                if (!(frags.any { it?.name == selectedItem.name } || specs.any { it?.name == selectedItem.name })) {
+                    outcome.status = 'sold_out'; return
+                }
+                inv.fragments = frags.findAll { it?.name != selectedItem.name }
+                inv.specialItems = specs.findAll { it?.name != selectedItem.name }
+                m.inventory = new JsonBuilder(inv).toString()
+            } else {
+                // COMMON: record against this player so it's hidden from THEM but stays buyable for others.
+                def pp = [:]
+                try { pp = new JsonSlurper().parseText(m.playerPurchases ?: '{}') } catch (Exception ignored) { pp = [:] }
+                def key = player.id.toString()
+                def list = (pp[key] ?: []) as List
+                if (!(selectedItem.name in list)) list << selectedItem.name
+                pp[key] = list
+                m.playerPurchases = new JsonBuilder(pp).toString()
             }
 
-            // Double-check bits amount in transaction (race condition protection)
-            if (managedPlayer.bits < selectedItem.price) {
-                throw new IllegalStateException("Insufficient bits - race condition detected")
-            }
-
+            // Charge + grant.
             managedPlayer.bits -= selectedItem.price
 
-            boolean isFragment = itemNumber <= fragments.size()
+            boolean isFragment = (selectedItem.kind == 'fragment')
             def fragmentType = getFragmentType(selectedItem.name)
 
             if (isFragment) {
@@ -318,13 +439,9 @@ class LambdaMerchantService {
             }
 
             managedPlayer.save(failOnError: true)
+            m.save(failOnError: true)
         }
-
-        return [
-                success: true,
-                output : "✅ Purchased ${selectedItem.name} for ${selectedItem.price} bits!\r\n",
-                action : "purchase"
-        ]
+        return outcome
     }
 
 
