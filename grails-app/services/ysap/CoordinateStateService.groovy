@@ -106,6 +106,10 @@ class CoordinateStateService {
                 "where c.matrixLevel = :lvl and c.coordinateX = :x and c.coordinateY = :y and c.health <= 0",
                 [now: new Date(), lvl: matrixLevel, x: x, y: y])
             claimed = (updated == 1)
+            // The bulk UPDATE bypasses the persistence context, so any CoordinateState already loaded in
+            // this thread's session is now stale (still health<=0). Clear it so the very next read — e.g.
+            // the HUD map re-render right after a repair completes — reloads the repaired truth from the DB.
+            CoordinateState.withSession { it.clear() }
         }
         return claimed
     }

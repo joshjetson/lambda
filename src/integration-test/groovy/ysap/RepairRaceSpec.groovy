@@ -42,6 +42,19 @@ class RepairRaceSpec extends Specification {
         !coordinateStateService.tryClaimRepair(2, 4, 4)       // already repaired → loses
     }
 
+    void "a repaired sector reads as restored immediately — no stale cache after the bulk UPDATE"() {
+        given: "a wiped sector, read once so it's loaded into the session (where a stale cache would bite)"
+        coordinateStateService.damageCoordinate(2, 7, 7, 100)
+        assert coordinateStateService.getMatrixLevelHealth(2)['7,7'].health <= 0
+
+        when: "it is claim-repaired (bulk UPDATE bypasses the persistence context, then session.clear())"
+        boolean won = coordinateStateService.tryClaimRepair(2, 7, 7)
+
+        then: "the very next health read sees 100 — so the HUD map re-render shows it restored at once"
+        won
+        coordinateStateService.getMatrixLevelHealth(2)['7,7'].health == 100
+    }
+
     void "the winner is rewarded with bits and the success box shows the prize"() {
         given:
         def p = player('repair_winner')
