@@ -805,25 +805,32 @@ class HudService {
     private boolean processChatCommand(String command, LambdaPlayer player) {
         String playerId = player.username
         boolean messageSent = false
-        
+
         try {
-            // Only process actual chat commands (echo)
-            if (command.trim().startsWith('echo ') && command.trim().length() > 5) {
-                // Send the message via chat service
-                chatService.handleChatCommand(command.trim(), player, hudSessionWriters[playerId])
-                messageSent = true
-            }
-            
-            // Always refresh chat history to show latest messages
+            String cmd = command.trim()
+            // Route EVERY heap command through the chat service — not just echo. This is what gives HUD
+            // full heap parity: pay / pm / trade / offer / accept / list / help all work now. echo
+            // broadcasts (it shows via the DB refresh below); the others return a direct response we
+            // surface in the panel so the action is visible.
+            String response = chatService.handleChatCommand(cmd, player, hudSessionWriters[playerId])
+            messageSent = cmd.toLowerCase().startsWith('echo ')
+
+            // Pull broadcast messages (echo, trade/payment notices) from the DB.
             refreshChatHistory(playerId)
-            
-        } catch (Exception e) {
-            // Simple error handling
-            if (!heapChatHistory[playerId]) {
-                heapChatHistory[playerId] = []
+
+            // Non-broadcast responses (list / pay / pm / trade / help) aren't DB chat — append them to the
+            // panel so they're visible this turn. The next command's refresh rebuilds from the DB.
+            if (response?.trim() && !messageSent) {
+                if (heapChatHistory[playerId] == null) heapChatHistory[playerId] = []
+                stripAnsiCodes(response).split('\r\n').each { line ->
+                    if (line?.trim()) heapChatHistory[playerId] << ("» " + line.trim())
+                }
             }
+        } catch (Exception e) {
+            if (heapChatHistory[playerId] == null) heapChatHistory[playerId] = []
+            heapChatHistory[playerId] << ("» error: " + e.message)
         }
-        
+
         return messageSent
     }
 
