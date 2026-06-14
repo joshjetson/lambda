@@ -76,11 +76,15 @@ class CompetitivePuzzleService {
     def getPlayerSpecificPuzzleElements(LambdaPlayer player, String gameSessionId, Integer mapNumber, Integer x, Integer y) {
         def results = []
         
-        // Find player's puzzle states for this map
+        // Find player's puzzle states for this map. Refresh each from the DB: collection happens in a
+        // separate command/transaction whose committed hasCollectedVariable=true may not be reflected in
+        // this read's cached copy — without the refresh, scan keeps advertising an already-collected
+        // variable. (The collect write itself uses a bulk UPDATE, which bypasses the persistence context.)
         def playerStates = PlayerPuzzleState.findAllByPlayerIdAndGameSessionIdAndMapNumber(
             player.id.toString(), gameSessionId, mapNumber
         )
-        
+        playerStates.each { try { it.refresh() } catch (ignored) { } }
+
         playerStates.each { state ->
             // Check if current coordinates match this player's variable location
             if (state.variableCoordinateX == x && state.variableCoordinateY == y && !state.hasCollectedVariable) {
@@ -136,16 +140,23 @@ class CompetitivePuzzleService {
                 return result
             }
             
-            // Mark as collected and add to player's collection
-            playerState.recordVariableCollection()
-            playerState.save(failOnError: true)
-            
             def managedPlayer = LambdaPlayer.get(player.id)
             if (managedPlayer) {
                 managedPlayer.addToCollectedVariables(variable)
                 managedPlayer.save(failOnError: true)
             }
-            
+
+            // Mark the puzzle state collected with a DIRECT UPDATE. The entity-save path silently failed
+            // to flush this one flag (the variable association in the same transaction persisted, but
+            // playerState.hasCollectedVariable did not) — a known dirty-checking quirk in this graph. The
+            // bulk update is robust; clearing the session afterward evicts the now-stale cached state so
+            // the next scan re-reads hasCollectedVariable=true and stops advertising a collected variable.
+            playerState.recordVariableCollection()
+            PlayerPuzzleState.executeUpdate(
+                "update PlayerPuzzleState p set p.hasCollectedVariable = true where p.id = :id",
+                [id: playerState.id])
+            PlayerPuzzleState.withSession { it.clear() }
+
             result.success = true
             result.message = "📦 Variable collected: ${variable.variableName} for ${playerState.elementType} puzzle"
             result.variable = variable
