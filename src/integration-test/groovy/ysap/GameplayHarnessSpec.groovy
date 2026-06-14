@@ -39,6 +39,9 @@ class GameplayHarnessSpec extends Specification {
     @Autowired
     ClusterBotService clusterBotService
 
+    @Autowired
+    CoordinateStateService coordinateStateService
+
     def cleanupSpec() {
         bot?.close()
     }
@@ -109,6 +112,21 @@ class GameplayHarnessSpec extends Specification {
 
         and: "an unknown code is handled cleanly"
         bot.command('errno 999').toLowerCase().contains('no such error code')
+    }
+
+    void "moving onto a damaged sector is refused with the errno-5 sector line"() {
+        given: "a wiped sector on the player's level (bot is at (0,0), not in a cluster yet)"
+        coordinateStateService.damageCoordinate(1, 2, 2, 100)   // wipe level-1 (2,2)
+
+        when: "the player tries to cc onto it"
+        String out = bot.command('cc 2,2')
+
+        then: "refused with the computer-system sector line (errno 5, 'sector', 'damaged', repair_required)"
+        out.contains('errno 5')
+        out.toLowerCase().contains('sector')
+        out.toLowerCase().contains('damaged')
+        out.toLowerCase().contains('repair_required')
+        !out.toLowerCase().contains('coordinate change blocked')   // old wording is gone
     }
 
     void "an unknown command is handled gracefully and returns to the prompt"() {

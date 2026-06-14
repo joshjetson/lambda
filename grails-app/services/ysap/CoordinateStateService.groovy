@@ -1,6 +1,7 @@
 package ysap
 
 import grails.gorm.transactions.Transactional
+import ysap.helpers.ErrorCodes
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
@@ -51,7 +52,7 @@ class CoordinateStateService {
     def canPlayerMoveToCoordinate(LambdaPlayer player, Integer targetX, Integer targetY) {
         // Check if coordinate is accessible
         if (!isCoordinateAccessible(player.currentMatrixLevel, targetX, targetY)) {
-            return [allowed: false, reason: "Coordinate (${targetX},${targetY}) has been wiped by defrag processes"]
+            return [allowed: false, reason: ErrorCodes.sectorDamaged(targetX, targetY)]
         }
         
         // With coordinate change system, players can move to any accessible coordinate
@@ -369,7 +370,8 @@ class CoordinateStateService {
             if (specialItemService.hasActiveEffect(player, 'MATRIX_CLIPPER')) {
                 specialItemService.consumeEffect(player, 'MATRIX_CLIPPER')
             } else {
-                return TerminalFormatter.formatText("Coordinate change blocked: ${movementCheck.reason}", 'bold', 'red')
+                // reason is already an errno-style sector line — render it as-is (no extra prefix).
+                return TerminalFormatter.formatText(movementCheck.reason as String, 'bold', 'red') + "\r\n"
             }
         }
 
