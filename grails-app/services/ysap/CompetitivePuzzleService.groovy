@@ -173,9 +173,13 @@ class CompetitivePuzzleService {
             )
             
             if (playerState) {
+                // Direct UPDATE (the entity-save path silently drops these flags in this graph) so the
+                // calculated coords + flag actually stick — otherwise the puzzle room never reveals.
                 playerState.recordCoordinateCalculation(calculatedCoords)
-                playerState.save(failOnError: true)
-                
+                PlayerPuzzleState.executeUpdate(
+                    "update PlayerPuzzleState p set p.calculatedCoordinates = :coords, p.hasCalculatedCoords = true, p.coordinatesCalculatedAt = :now where p.id = :id",
+                    [coords: calculatedCoords, now: new Date(), id: playerState.id])
+
                 println "Player ${player.username} calculated coordinates for ${elementType}: ${calculatedCoords}"
                 return playerState
             }
@@ -223,9 +227,13 @@ class CompetitivePuzzleService {
             
             // Validate execution parameters
             if (puzzleRoom.validateExecution(flag, nonce)) {
-                // SUCCESS! Player obtained the symbol
+                // SUCCESS! Player obtained the symbol. Persist the obtained flag via a direct UPDATE:
+                // the entity-save path silently drops this flag in this graph (same defect as the
+                // variable-collection flag), which would let a solved room reappear as solvable.
                 playerState.recordSymbolObtained()
-                playerState.save(failOnError: true)
+                PlayerPuzzleState.executeUpdate(
+                    "update PlayerPuzzleState p set p.hasObtainedSymbol = true, p.symbolObtainedAt = :now where p.id = :id",
+                    [now: new Date(), id: playerState.id])
                 
                 // Award symbol to player
                 def managedPlayer = LambdaPlayer.get(player.id)
