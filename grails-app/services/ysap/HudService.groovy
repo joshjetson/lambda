@@ -965,25 +965,18 @@ class HudService {
             int maxOutputRows = screen.length - 6 // Leave room for outer box, prompt, and truncation message
             boolean truncated = false
             
-            for (int i = 0; i < outputLines.length; i++) {
-                if (outputRow >= maxOutputRows) {
-                    // Check if there are more lines to show
-                    if (i < outputLines.length - 1) {
-                        truncated = true
-                    }
-                    break
+            boolean stop = false
+            for (int i = 0; i < outputLines.length && !stop; i++) {
+                String cleanLine = stripAnsiCodes(outputLines[i])
+                // WRAP long lines onto extra rows instead of truncating, so nothing important (e.g. a
+                // symbol's MISSING/ACQUIRED status at the end of a long line) is lost. Char-count wrapping
+                // is emoji-safe: a wide glyph can only make a line wrap slightly early, never overflow.
+                List<String> pieces = (cleanLine.length() <= COMMAND_AREA_WIDTH - 6) ? [cleanLine] : wrapText(cleanLine, COMMAND_AREA_WIDTH - 6)
+                for (String piece : pieces) {
+                    if (outputRow >= maxOutputRows) { truncated = true; stop = true; break }
+                    writeToScreen(screen, outputRow, 3, piece)
+                    outputRow++
                 }
-                
-                String line = outputLines[i]
-                String cleanLine = stripAnsiCodes(line)
-                if (cleanLine.length() <= COMMAND_AREA_WIDTH - 6) { // Account for outer box
-                    writeToScreen(screen, outputRow, 3, cleanLine)
-                } else {
-                    // Word wrap long lines
-                    String wrappedLine = cleanLine.substring(0, COMMAND_AREA_WIDTH - 6)
-                    writeToScreen(screen, outputRow, 3, wrappedLine)
-                }
-                outputRow++
             }
             
             // Show truncation message if content was cut off
