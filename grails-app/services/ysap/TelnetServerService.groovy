@@ -2,6 +2,7 @@ package ysap
 
 import grails.gorm.transactions.Transactional
 import ysap.helpers.BoxBuilder
+import ysap.helpers.ErrorCodes
 
 import java.util.concurrent.CopyOnWriteArrayList
 import ysap.helpers.PlayerHelp
@@ -279,6 +280,10 @@ class TelnetServerService {
             },
             'history': { player, command, parts, writer ->
                 lambdaPlayerService.showCommandHistory(player)
+            },
+            'errno': { player, command, parts, writer ->
+                // System error lookup — `errno <n>` for one code, bare `errno` lists the catalogue.
+                (parts.length > 1 && parts[1].isInteger()) ? ErrorCodes.lookup(parts[1] as int) : ErrorCodes.index()
             },
             'hud': { player, command, parts, writer ->
                 // Switch to HUD mode

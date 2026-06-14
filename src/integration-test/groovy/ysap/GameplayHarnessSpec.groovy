@@ -98,6 +98,19 @@ class GameplayHarnessSpec extends Specification {
         out.toLowerCase().contains('bit') || out.toLowerCase().contains('fragment') || out.toLowerCase().contains('inventory')
     }
 
+    void "errno looks up a system error code (and lists the catalogue with no arg)"() {
+        expect: "errno 5 explains SECTOR_DAMAGED with a remedy"
+        def five = bot.command('errno 5')
+        five.contains('SECTOR_DAMAGED')
+        five.toLowerCase().contains('repair')
+
+        and: "bare errno lists the catalogue"
+        bot.command('errno').toLowerCase().contains('error codes')
+
+        and: "an unknown code is handled cleanly"
+        bot.command('errno 999').toLowerCase().contains('no such error code')
+    }
+
     void "an unknown command is handled gracefully and returns to the prompt"() {
         when:
         String out = bot.command('flibbertigibbet')
