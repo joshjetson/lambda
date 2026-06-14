@@ -355,8 +355,9 @@ class LambdaMerchantService {
             return result
         }
         
-        // Calculate sale price (50% of base value)
-        def salePrice = (50 + (playerFragment.powerLevel * 15)) / 2
+        // Calculate sale price (50% of base value). Integer division — bits is an Integer column, so a
+        // fractional price (e.g. 32.5) would truncate silently AND mis-print in the "Sold for N" message.
+        def salePrice = (50 + (playerFragment.powerLevel * 15)).intdiv(2)
         
         LambdaPlayer.withTransaction {
             def managedPlayer = LambdaPlayer.get(player.id)
