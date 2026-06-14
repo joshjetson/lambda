@@ -39,6 +39,16 @@ class BoxBuilder {
         return stripAnsi(s).length()
     }
 
+    // Force a line to EXACTLY `width` visible columns: pad if short, truncate if long. A line that
+    // exceeds the box width would otherwise shove the right ║ border out and corrupt the whole box
+    // (this is what mangled the narrow HUD help). Truncation strips ANSI (box content is plain text).
+    private static String fitToWidth(String line, int width) {
+        int visible = visibleLength(line)
+        if (visible == width) return line
+        if (visible < width) return line + (' ' * (width - visible))
+        return stripAnsi(line).substring(0, width)
+    }
+
     // Add a centered line
     BoxBuilder addCenteredLine(String text) {
         def padding = Math.max(0, width - visibleLength(text))
@@ -79,9 +89,7 @@ class BoxBuilder {
             if (line == "SEPARATOR") {
                 result.append(CROSS_LEFT).append(HORIZONTAL * width).append(CROSS_RIGHT).append("\r\n")
             } else {
-                def visible = visibleLength(line)
-                def paddedLine = visible < width ? line + (' ' * (width - visible)) : line
-                result.append(VERTICAL).append(paddedLine).append(VERTICAL).append("\r\n")
+                result.append(VERTICAL).append(fitToWidth(line, width)).append(VERTICAL).append("\r\n")
             }
         }
 

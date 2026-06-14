@@ -114,6 +114,19 @@ class GameplayHarnessSpec extends Specification {
         bot.command('errno 999').toLowerCase().contains('no such error code')
     }
 
+    void "help now covers sector repair and the errno system"() {
+        expect: "basic help points the player at repairing damaged sectors"
+        def basic = bot.command('help basic')
+        basic.toLowerCase().contains('repair')
+        basic.toLowerCase().contains('sector')
+
+        and: "the new errors category explains the errno facility"
+        bot.command('help errors').toLowerCase().contains('errno')
+
+        and: "the repair category renders (no exception) and mentions the mini-game"
+        bot.command('help repair').toLowerCase().contains('repair')
+    }
+
     void "moving onto a damaged sector is refused with the errno-5 sector line"() {
         given: "a wiped sector on the player's level (bot is at (0,0), not in a cluster yet)"
         coordinateStateService.damageCoordinate(1, 2, 2, 100)   // wipe level-1 (2,2)
