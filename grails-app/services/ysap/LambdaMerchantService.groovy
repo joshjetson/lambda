@@ -232,14 +232,19 @@ class LambdaMerchantService {
             .addCenteredLine("LOGIC FRAGMENTS")
             .addSeparator()
 
+        // Unique items are marked with a compact '*' in the slot after the item number (a wordy
+        // "(unique)" tag overflows the 48-col box and gets truncated). A legend line explains it.
         boolean anyFragment = false
         boolean anySpecial = false
+        boolean anyUnique = false
+        def itemLine = { int num, Map item ->
+            if (item.unique) anyUnique = true
+            def numMark = (num.toString() + (item.unique ? '*' : '')).padRight(3)  // '1*' hugs the digit
+            " ${numMark} ${item.name.padRight(23)} ${item.price.toString().padLeft(6)} bits"
+        }
+
         visible.eachWithIndex { item, index ->
-            if (item.kind == 'fragment') {
-                anyFragment = true
-                def tag = item.unique ? " (unique)" : ""
-                box.addLine(" ${(index + 1).toString().padRight(2)} ${item.name.padRight(25)} ${item.price.toString().padLeft(6)} bits${tag}")
-            }
+            if (item.kind == 'fragment') { anyFragment = true; box.addLine(itemLine(index + 1, item)) }
         }
         if (!anyFragment) box.addLine(" (sold out)")
 
@@ -248,13 +253,13 @@ class LambdaMerchantService {
             .addSeparator()
 
         visible.eachWithIndex { item, index ->
-            if (item.kind == 'special') {
-                anySpecial = true
-                def tag = item.unique ? " (unique)" : ""
-                box.addLine(" ${(index + 1).toString().padRight(2)} ${item.name.padRight(25)} ${item.price.toString().padLeft(6)} bits${tag}")
-            }
+            if (item.kind == 'special') { anySpecial = true; box.addLine(itemLine(index + 1, item)) }
         }
         if (!anySpecial) box.addLine(" (sold out)")
+
+        if (anyUnique) {
+            box.addSeparator().addLine(" * unique - first buyer takes it for good")
+        }
 
         def result = box.build()
         result += "Commands: buy <number> | sell <fragment_name> | exit\r\n"

@@ -91,6 +91,11 @@ class MerchantStockSpec extends Specification {
         def a = makePlayer('UniqueBuyerA')
         def b = makePlayer('UniqueBuyerB')
 
+        expect: "the shop flags the unique item with a compact '*' marker and a legend (fits the box)"
+        def shopOut = shop(m, a)
+        shopOut =~ /1\*\s+Exception Handling/
+        shopOut.contains('* unique')
+
         when: "A buys the unique item"
         def res = buy(m, 1, a)
 
