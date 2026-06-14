@@ -182,51 +182,13 @@ class TelnetServerService {
                 lambdaMerchantService.handleMerchantCommand(command, player)
             },
             'entropy': { player, command, parts, writer ->
-                def result = entropyService.handleEntropyCommand(command, player)
-                
-                // Update session if entropy was refreshed
-                if (command.toLowerCase().contains('refresh')) {
-                    LambdaPlayer.withTransaction {
-                        def updatedPlayer = LambdaPlayer.get(player.id)
-                        if (updatedPlayer) {
-                            playerSessions[writer] = updatedPlayer
-                            player.entropy = updatedPlayer.entropy
-                            player.bits = updatedPlayer.bits
-                        }
-                    }
-                }
-                
-                return result
+                entropyService.handleEntropyCommand(command, player)   // status re-reads the live row, so display stays fresh
             },
             'mine': { player, command, parts, writer ->
-                def result = entropyService.handleMiningCommand(player)
-                
-                // Update session if mining rewards were collected
-                LambdaPlayer.withTransaction {
-                    def updatedPlayer = LambdaPlayer.get(player.id)
-                    if (updatedPlayer) {
-                        playerSessions[writer] = updatedPlayer
-                        player.bits = updatedPlayer.bits
-                        player.entropy = updatedPlayer.entropy
-                    }
-                }
-                
-                return result
+                entropyService.handleMiningCommand(player)
             },
             'mining': { player, command, parts, writer ->
-                def result = entropyService.handleMiningCommand(player)
-                
-                // Update session if mining rewards were collected
-                LambdaPlayer.withTransaction {
-                    def updatedPlayer = LambdaPlayer.get(player.id)
-                    if (updatedPlayer) {
-                        playerSessions[writer] = updatedPlayer
-                        player.bits = updatedPlayer.bits
-                        player.entropy = updatedPlayer.entropy
-                    }
-                }
-                
-                return result
+                entropyService.handleMiningCommand(player)
             },
             'fuse': { player, command, parts, writer ->
                 entropyService.handleFusionCommand(command, player)
@@ -656,7 +618,7 @@ class TelnetServerService {
                                 writer.println(response.substring(5)) // Remove "QUIT:" prefix
                                 break
                             }
-                            
+
                             sendFormattedOutput(clientSocket.getOutputStream(), response)
                         }
                     }

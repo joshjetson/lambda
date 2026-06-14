@@ -416,7 +416,9 @@ class CoordinateStateService {
         // (no-op for Node players — setMemberPosition only writes if they're in an active match).
         clusterMatchService.setMemberPosition(player.username, newX, newY)
 
-        // Update the player object in the session with new coordinates
+        // Sync the in-memory player to the just-saved DB position (movePlayer persisted it above) so the
+        // board update + dynamic prompt rendered after THIS command show the new coordinates, not the
+        // pre-move ones. Position is the one scalar the prompt reads off the loop object every command.
         LambdaPlayer.withTransaction {
             def updatedPlayer = LambdaPlayer.get(player.id)
             if (updatedPlayer) {

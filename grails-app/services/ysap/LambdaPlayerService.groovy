@@ -495,11 +495,19 @@ class LambdaPlayerService {
         def status = new StringBuilder()
         def entropyStatus = entropyService.getEntropyStatus(player)
 
+        // The passed `player` is the login-time detached snapshot the telnet loop holds; a command that just
+        // ran (buy/sell/entropy/move) commits to the DB but does NOT mutate this object, so reading its
+        // scalars directly prints STALE values. Re-read the live row for the dynamic scalars — same pattern
+        // showInventory already uses for bits. (displayName is immutable, so the snapshot is fine for it.)
+        def live = null
+        LambdaPlayer.withTransaction { live = LambdaPlayer.get(player.id) }
+        def fresh = live ?: player
+
         status.append(TerminalFormatter.formatText("=== DETAILED LAMBDA STATUS ===", 'bold', 'cyan')).append('\r\n')
         status.append("Entity: ${player.displayName}\r\n")
-        status.append("Matrix Level: ${player.currentMatrixLevel}/10\r\n")
-        status.append("Coordinates: (${player.positionX},${player.positionY})\r\n")
-        status.append("Bits: ${player.bits}\r\n")
+        status.append("Matrix Level: ${fresh.currentMatrixLevel}/10\r\n")
+        status.append("Coordinates: (${fresh.positionX},${fresh.positionY})\r\n")
+        status.append("Bits: ${fresh.bits}\r\n")
         def currentEntropy = entropyStatus.currentEntropy ?: 100.0
         status.append("Digital Coherence: ${TerminalFormatter.formatText("${currentEntropy}%", entropyService.getEntropyColor(currentEntropy), 'bold')}\r\n")
 

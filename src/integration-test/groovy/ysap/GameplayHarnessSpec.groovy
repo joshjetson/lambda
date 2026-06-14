@@ -42,6 +42,9 @@ class GameplayHarnessSpec extends Specification {
     @Autowired
     CoordinateStateService coordinateStateService
 
+    @Autowired
+    LambdaMerchantService lambdaMerchantService
+
     def cleanupSpec() {
         bot?.close()
     }
@@ -140,6 +143,47 @@ class GameplayHarnessSpec extends Specification {
         out.toLowerCase().contains('damaged')
         out.toLowerCase().contains('repair_required')
         !out.toLowerCase().contains('coordinate change blocked')   // old wording is gone
+    }
+
+
+    void "buy/sell update bits consistently in BOTH status and inventory (no stale session player)"() {
+        given: "a FRESH trader (so botuser's @Stepwise state is untouched) at a vendor with a cheap item"
+        def trader = new LambdaTelnetClient('localhost', TELNET_PORT)
+        trader.createCharacter('trader1', 'Trader1', 1)
+        LambdaPlayer.withTransaction {
+            def p = LambdaPlayer.findByUsername('trader1')
+            p.bits = 100
+            def f = new LogicFragment(name: 'Basic Print', description: 'x', fragmentType: 'FUNCTION',
+                    powerLevel: 1, pythonCapability: 'print', quantity: 1, isActive: true,
+                    discoveredDate: new Date(), owner: p)
+            f.save(failOnError: true); p.addToLogicFragments(f); p.save(failOnError: true)
+            if (!lambdaMerchantService.getMerchantAt(1, 0, 0)) {
+                new LambdaMerchant(merchantName: 'Test Vendor', matrixLevel: 1, positionX: 0, positionY: 0,
+                        merchantType: 'FRAGMENT_TRADER', isActive: true, spawnedDate: new Date(),
+                        inventory: '{"fragments":[{"name":"Data Types","price":40,"rarity":"common"}],"specialItems":[]}').save(failOnError: true)
+            }
+        }
+        trader.command('cc 0,0')   // trader spawns at (0,0); the vendor is here
+
+        when: "the trader sells a fragment (integer payout) then buys a 40-bit item"
+        String sellOut = trader.command('sell basic print')
+        trader.command('buy 1')
+        def sm = (trader.command('status') =~ /Bits:\s*(\d+)/)
+        def im = (trader.command('inventory') =~ /Bits:\s*(\d+)/)
+        int statusBits = sm ? (sm[0][1] as int) : -1
+        int invBits = im ? (im[0][1] as int) : -2
+
+        then: "the sale paid a whole number of bits (no 32.5)"
+        sellOut.contains('Sold') && !sellOut.contains('.5')
+
+        and: "status and inventory show the SAME bits — the session player is refreshed after each command"
+        statusBits == invBits
+
+        and: "and that value reflects the transactions: 100 + 32 (sell) - 40 (buy) = 92"
+        statusBits == 92
+
+        cleanup:
+        trader?.close()
     }
 
     void "an unknown command is handled gracefully and returns to the prompt"() {
